@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/ 
+#installed packages upload mat kar
+
+# Python  installed packages upload mat kar
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Environment variables / secrets API keys/secrets kabhi GitHub par mat bhej
+.env
+.env.*
+!.env.example
+
+# Logs → temporary logs ignore kar
+*.log
+
+# Build / cache files → generated build files ignore kar
+.next/
+dist/
+build/
+
+# OS files → operating-system junk ignore kar
+.DS_Store
+Thumbs.db
+
+# IDE → personal editor settings ignore kar
+.vscode/
