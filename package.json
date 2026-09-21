@@ -1,0 +1,20 @@
+{
+  "name": "ai-software-engineering-companion",
+  "version": "0.1.0",
+  "description": "AI-powered software engineering companion — monorepo root",
+  "private": true,
+  "scripts": {
+    "dev": "echo Use 'npm run dev:frontend', 'npm run dev:backend', or 'npm run dev:ai' to start individual services",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:ai": "cd ai-service && .venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && npm run build",
+    "install:frontend": "cd frontend && npm install",
+    "install:backend": "cd backend && npm install",
+    "install:ai": "cd ai-service && .venv\\Scripts\\pip.exe install -r requirements.txt",
+    "install:all": "npm run install:frontend && npm run install:backend && npm run install:ai"
+  },
+  "author": "Aaditya Sharma",
+  "license": "ISC"
+}

@@ -1,0 +1,13 @@
+# AI Service — Python Dependencies
+# =================================
+# Core
+fastapi>=0.141.0
+pydantic>=2.13.0
+pydantic-settings>=2.9.0
+uvicorn[standard]>=0.53.0
+
+# Environment
+python-dotenv>=1.2.0
+
+# HTTP client (for inter-service calls)
+httpx>=0.28.0
