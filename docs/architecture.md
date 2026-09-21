@@ -197,3 +197,57 @@ The system enforces strict error boundaries to prevent sensitive details or stac
 | `HOST` | AI Service | `0.0.0.0` | Bind host for FastAPI/uvicorn |
 | `DEBUG` | AI Service | `true` | FastAPI debug flag (disables docs in prod) |
 
+---
+
+## Phase 3: Python AI Service Core
+
+Phase 3 refactors the internal Python AI Service into a modular, clean, and testable domain architecture. It decouples business rules from the FastAPI transport layer, preparing a structured foundation for Phase 4 LLM provider integration.
+
+### 1. Internal AI Service Architecture
+
+```
+                 [HTTP / REST Request from Backend]
+                                 │
+                                 ▼
+                     FastAPI Router (`app/routers/chat.py`)
+                                 │
+                     ChatRequest (Pydantic validation)
+                                 │
+                                 ▼
+                    Service Layer (`app/services/chat_service.py`)
+                     ┌───────────┴───────────┐
+                     ▼                       ▼
+          `ConversationManager`       `PromptBuilder`
+         (`services/conversation.py`) (`services/prompt.py`)
+                     │                       │
+           • Session resolution       • System prompt injection
+           • Bounded history storage  • History formatting
+           • Message role tracking    • Normalized message list
+                     │                       │
+                     └───────────┬───────────┘
+                                 │
+                 Structured Response Generation
+            (Deterministic mock in Phase 3 / LLM hook in Phase 4)
+                                 │
+                                 ▼
+                   Pydantic `ChatResponse` Model
+                                 │
+                                 ▼
+                     [HTTP / REST 200 OK Response]
+```
+
+### 2. Core Abstractions
+
+| Component | File | Responsibility |
+|---|---|---|
+| **Schemas** | `app/schemas/chat.py` | Typed Pydantic models for request, response, message entities (`ChatMessage`, `MessageRole`), and error envelopes (`ErrorResponse`). |
+| **Conversation Manager** | `app/services/conversation.py` | Manages in-memory multi-turn sessions with bounded message retention (`max_conversation_history`), session creation, and message appending. |
+| **Prompt Builder** | `app/services/prompt.py` | Assembles normalized message sequences (`system`, `history`, `user`) for LLMs, including optional project context injection. |
+| **Chat Service** | `app/services/chat_service.py` | Core orchestrator coordinating input validation, session tracking, prompt construction, response generation, and turn recording. |
+| **Custom Exceptions** | `app/exceptions.py` | Domain-level exceptions (`AIServiceException`, `ValidationError`, `SessionNotFoundError`) mapped to structured HTTP responses by centralized handlers. |
+
+### 3. Preparation for Phase 4 (LLM Provider Abstraction)
+
+The `ChatService._generate_reply` method serves as the clean isolation boundary. In Phase 4, this method will delegate to an abstract `LLMProvider` interface (OpenAI, Anthropic, Ollama, etc.) without altering the router, conversation manager, or API contract.
+
+

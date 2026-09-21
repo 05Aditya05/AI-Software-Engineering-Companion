@@ -1,17 +1,48 @@
 """
-Chat request and response schemas.
+Chat request, response, message, and error schemas.
 
-Defines the payload contract for communication between the Backend
-and the AI Service. In Phase 4, these schemas will be extended with
-token streaming parameters and agent dispatch metadata.
+Defines the payload contracts for the AI Service domain and API layers.
+In Phase 4, these schemas will be extended with token streaming parameters
+and LLM provider configuration.
 """
 
+from enum import Enum
 from typing import Any
 from pydantic import BaseModel, Field
 
 
+class MessageRole(str, Enum):
+    """Roles for messages within a conversation history."""
+
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
+class ChatMessage(BaseModel):
+    """An individual message in a conversation session."""
+
+    role: MessageRole = Field(
+        ...,
+        description="Role of the entity who created this message."
+    )
+    content: str = Field(
+        ...,
+        min_length=1,
+        description="Text content of the message."
+    )
+    timestamp: str = Field(
+        ...,
+        description="ISO 8601 UTC timestamp of message creation."
+    )
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional metadata attached to this message."
+    )
+
+
 class ChatRequest(BaseModel):
-    """Payload sent from the backend to the AI service."""
+    """Payload sent to the AI service to initiate or continue a chat."""
 
     message: str = Field(
         ...,
@@ -31,7 +62,7 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """Payload returned by the AI service back to the backend."""
+    """Payload returned by the AI service back to caller."""
 
     message: str = Field(
         ...,
@@ -51,9 +82,24 @@ class ChatResponse(BaseModel):
     )
     status: str = Field(
         default="success",
-        description="Status code/string of the processing."
+        description="Status string of the processing."
     )
     meta: dict[str, Any] | None = Field(
         default=None,
-        description="Additional processing metadata (e.g. echo metadata, mock tags)."
+        description="Additional processing metadata."
     )
+
+
+class ErrorDetail(BaseModel):
+    """Structured error information."""
+
+    code: str = Field(..., description="Machine-readable error code.")
+    message: str = Field(..., description="Human-readable error description.")
+    details: Any | None = Field(default=None, description="Optional extra error context.")
+
+
+class ErrorResponse(BaseModel):
+    """Standard error response envelope."""
+
+    status: str = Field(default="error", description="Always 'error' for failure responses.")
+    error: ErrorDetail = Field(..., description="Detailed error information.")

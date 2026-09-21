@@ -8,10 +8,12 @@ Mounts routers, middleware, and exception handlers.
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config import settings
+from app.exceptions import AIServiceException
 from app.routers import health, chat
 
 
@@ -56,6 +58,21 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Exception handlers
+    @app.exception_handler(AIServiceException)
+    async def ai_service_exception_handler(_req: Request, exc: AIServiceException) -> JSONResponse:
+        status_code = 400 if exc.code == "VALIDATION_ERROR" else 500
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "status": "error",
+                "error": {
+                    "code": exc.code,
+                    "message": exc.message,
+                },
+            },
+        )
 
     # Mount routers
     app.include_router(health.router, prefix="/api/health")
