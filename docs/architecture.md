@@ -119,3 +119,81 @@ Agents are not independent LLM services. They are specialized workflows sharing 
 - No external data upload without consent
 - Audit logging for all tool executions
 - Repository content treated as potentially untrusted input
+
+---
+
+## Phase 2: Communication Architecture
+
+Phase 2 establishes the end-to-end communication pipeline across all three services.
+
+### 1. Request Flow (REST Pipeline)
+
+```
+[User]
+   │  Types message in Chat UI
+   ▼
+[Next.js Frontend] (port 3000)
+   │
+   │  POST http://localhost:3001/api/chat
+   │  Headers: Content-Type: application/json
+   │  Payload: { "message": "...", "conversationId": "..." }
+   ▼
+[Node.js / Express Backend] (port 3001)
+   │  1. Validates body is valid JSON
+   │  2. Validates `message` is non-empty trimmed string (returns 400 on error)
+   │  3. Validates optional `conversationId`
+   │
+   │  POST http://localhost:8000/api/chat/
+   │  Timeout: 10,000ms (configurable via AI_SERVICE_TIMEOUT_MS)
+   │  Payload: { "message": "...", "conversation_id": "..." }
+   ▼
+[Python / FastAPI AI Service] (port 8000)
+   │  1. Pydantic schema validation (`ChatRequest`)
+   │  2. Assigns or preserves session UUID
+   │  3. Returns deterministic structured response (`ChatResponse`)
+   ▼
+[Node.js / Express Backend]
+   │  1. Validates AI response format (returns 502 on malformed response)
+   │  2. Returns normalized envelope: { "status": "success", "data": { ... } }
+   ▼
+[Next.js Frontend]
+   │  Renders assistant message bubble with metadata badges
+   ▼
+[User]
+```
+
+### 2. WebSocket Infrastructure
+
+- **Path**: `ws://localhost:3001/ws`
+- **Purpose**: Establishes a persistent bi-directional channel for subsequent phases.
+  - In Phase 2: Handles connection lifecycle, handshake confirmation (`type: "connection"`), and heartbeat ping/pong (`type: "ping"` -> `type: "pong"`).
+  - In Phase 4/5: Streams LLM response tokens in real-time as they are generated.
+  - In Phase 7/8: Streams live tool execution events, agent state transitions, and background status updates to the UI.
+
+### 3. Error Handling Architecture
+
+The system enforces strict error boundaries to prevent sensitive details or stack traces from leaking to the client:
+
+| Scenario | HTTP Status | Error Code | Client Message |
+|---|---|---|---|
+| **Empty or whitespace message** | `400 Bad Request` | `INVALID_MESSAGE` | Field 'message' is required and must be a non-empty string. |
+| **Malformed JSON body** | `400 Bad Request` | `INVALID_REQUEST_BODY` | Request body must be a valid JSON object. |
+| **Invalid conversation ID format** | `400 Bad Request` | `INVALID_CONVERSATION_ID` | Field 'conversationId' must be a non-empty string if provided. |
+| **AI service unreachable (offline)** | `502 Bad Gateway` | `AI_SERVICE_UNAVAILABLE` | AI service is currently unreachable. Please verify that the AI service is running. |
+| **AI service request timeout** | `504 Gateway Timeout` | `GATEWAY_TIMEOUT` | AI service request timed out after Xms. |
+| **AI service 5xx or bad schema** | `502 Bad Gateway` | `AI_SERVICE_ERROR` / `MALFORMED_AI_RESPONSE` | Sanitized error without internal stack traces. |
+
+### 4. Environment Variables
+
+| Variable | Service | Default | Description |
+|---|---|---|---|
+| `PORT` | Backend | `3001` | Express HTTP server port |
+| `NODE_ENV` | Backend | `development` | Runtime environment mode |
+| `AI_SERVICE_URL` | Backend | `http://localhost:8000` | Target URL for AI service proxying |
+| `AI_SERVICE_TIMEOUT_MS` | Backend | `10000` | Timeout threshold for AI service calls |
+| `FRONTEND_URL` | Backend | `http://localhost:3000` | Allowed origin for CORS validation |
+| `NEXT_PUBLIC_BACKEND_URL` | Frontend | `http://localhost:3001` | REST API base URL for client fetch requests |
+| `NEXT_PUBLIC_WS_URL` | Frontend | `ws://localhost:3001/ws` | WebSocket server URL for real-time channel |
+| `HOST` | AI Service | `0.0.0.0` | Bind host for FastAPI/uvicorn |
+| `DEBUG` | AI Service | `true` | FastAPI debug flag (disables docs in prod) |
+

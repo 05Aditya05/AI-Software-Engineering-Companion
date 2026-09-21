@@ -19,6 +19,9 @@ export const config = {
   /** AI service base URL */
   aiServiceUrl: process.env.AI_SERVICE_URL || "http://localhost:8000",
 
+  /** AI service request timeout in milliseconds */
+  aiServiceTimeoutMs: parseInt(process.env.AI_SERVICE_TIMEOUT_MS || "10000", 10),
+
   /** Frontend origin for CORS */
   frontendUrl: process.env.FRONTEND_URL || "http://localhost:3000",
 

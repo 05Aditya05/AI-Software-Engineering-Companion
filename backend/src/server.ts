@@ -7,6 +7,7 @@
 
 import app from "./app";
 import { config } from "./config";
+import { setupWebSocket } from "./websocket";
 
 const server = app.listen(config.port, () => {
   console.log(`
@@ -17,15 +18,22 @@ const server = app.listen(config.port, () => {
 |   Port:    ${String(config.port).padEnd(37)}|
 |   Env:     ${config.nodeEnv.padEnd(37)}|
 |   Health:  http://localhost:${config.port}/api/health${" ".repeat(Math.max(0, 14 - String(config.port).length))}|
+|   WS:      ws://localhost:${config.port}/ws${" ".repeat(Math.max(0, 20 - String(config.port).length))}|
 +==================================================+
   `);
 });
 
+// Attach WebSocket server
+const wss = setupWebSocket(server);
+
 // Graceful shutdown
 const shutdown = (signal: string) => {
   console.log(`\n[${signal}] Shutting down gracefully...`);
+  wss.close(() => {
+    console.log("WebSocket server closed.");
+  });
   server.close(() => {
-    console.log("Server closed.");
+    console.log("HTTP server closed.");
     process.exit(0);
   });
 };

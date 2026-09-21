@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import health
+from app.routers import health, chat
 
 
 @asynccontextmanager
@@ -59,6 +59,7 @@ def create_app() -> FastAPI:
 
     # Mount routers
     app.include_router(health.router, prefix="/api/health")
+    app.include_router(chat.router, prefix="/api/chat")
 
     # Root endpoint
     @app.get("/")
