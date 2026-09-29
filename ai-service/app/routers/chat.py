@@ -37,6 +37,7 @@ def _get_project_context() -> str | None:
         return None
 
 
+@router.post("", response_model=ChatResponse, status_code=status.HTTP_200_OK, include_in_schema=False)
 @router.post("/", response_model=ChatResponse, status_code=status.HTTP_200_OK)
 async def process_chat(request: ChatRequest) -> ChatResponse:
     """

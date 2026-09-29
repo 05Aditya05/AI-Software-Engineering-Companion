@@ -212,3 +212,73 @@ def test_gemini_chat_no_system_message() -> None:
     call_kwargs = mock_client.models.generate_content.call_args.kwargs
     config = call_kwargs["config"]
     assert config.system_instruction is None
+    assert config.automatic_function_calling.disable is True
+
+
+def test_gemini_chat_server_error_preserves_code_and_status() -> None:
+    """ServerError message includes code, status, and upstream message safely."""
+    from google.genai import errors as genai_errors
+
+    provider, mock_client = _make_provider_with_mock_client()
+    error_payload = {
+        "error": {
+            "code": 503,
+            "message": "Model experiencing high demand.",
+            "status": "UNAVAILABLE",
+        }
+    }
+    server_error = genai_errors.ServerError(503, error_payload)
+    mock_client.models.generate_content.side_effect = server_error
+
+    with patch("time.sleep"):  # Avoid test delay during retry
+        with pytest.raises(LLMProviderError) as exc_info:
+            provider.chat([{"role": "user", "content": "hi"}])
+
+    assert exc_info.value.code == "LLM_SERVER_ERROR"
+    assert "503 UNAVAILABLE" in exc_info.value.message
+    assert "Model experiencing high demand." in exc_info.value.message
+
+
+def test_gemini_chat_retries_503_and_recovers() -> None:
+    """ServerError 503 is retried up to 2 times and succeeds if transient."""
+    from google.genai import errors as genai_errors
+
+    provider, mock_client = _make_provider_with_mock_client("Recovered response.")
+    server_error = genai_errors.ServerError(503, {"error": {"code": 503, "status": "UNAVAILABLE"}})
+
+    # First call fails with 503, second call succeeds
+    mock_response = MagicMock()
+    mock_response.text = "Recovered response."
+    mock_response.candidates = []
+    mock_client.models.generate_content.side_effect = [server_error, mock_response]
+
+    with patch("time.sleep") as mock_sleep:
+        res = provider.chat([{"role": "user", "content": "hi"}])
+
+    assert res.text == "Recovered response."
+    assert mock_client.models.generate_content.call_count == 2
+    mock_sleep.assert_called_once()
+
+
+def test_gemini_chat_sanitizes_api_key_from_errors() -> None:
+    """If an upstream error message contains the API key, it is redacted."""
+    from google.genai import errors as genai_errors
+
+    secret_key = "AIzaSySecretTestKey123"
+    mock_client = MagicMock()
+    server_error = genai_errors.ServerError(
+        500,
+        {"error": {"code": 500, "message": f"Invalid key {secret_key} used.", "status": "INTERNAL"}},
+    )
+    mock_client.models.generate_content.side_effect = server_error
+
+    with patch("app.providers.gemini.Client", return_value=mock_client):
+        provider = GeminiProvider(api_key=secret_key, model="gemini-2.0-flash")
+    provider._client = mock_client
+
+    with pytest.raises(LLMProviderError) as exc_info:
+        provider.chat([{"role": "user", "content": "hi"}])
+
+    assert secret_key not in exc_info.value.message
+    assert "[REDACTED]" in exc_info.value.message
+

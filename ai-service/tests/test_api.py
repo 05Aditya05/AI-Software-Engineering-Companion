@@ -66,6 +66,14 @@ def test_chat_endpoint_valid(client) -> None:
     assert data["message"]  # non-empty LLM reply
 
 
+def test_chat_endpoint_slashless(client) -> None:
+    """POST /api/chat (without trailing slash) is accepted without redirect."""
+    payload = {"message": "Hello without slash!"}
+    response = client.post("/api/chat", json=payload, follow_redirects=False)
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+
 def test_chat_endpoint_session_continuity(client) -> None:
     """POST /api/chat/ preserves conversation_id across turns."""
     session_id = "test-session-api"

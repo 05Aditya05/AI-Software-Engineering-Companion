@@ -10,6 +10,8 @@ Mapping between application message roles and Gemini content roles:
     "assistant" → "model" content role
 """
 
+import time
+
 from google.genai import Client, errors as genai_errors
 from google.genai import types as genai_types
 
@@ -39,6 +41,7 @@ class GeminiProvider(LLMProvider):
                 "Set the GEMINI_API_KEY environment variable.",
                 code="LLM_MISSING_API_KEY",
             )
+        self._api_key = api_key
         self._model = model
         self._timeout_ms = timeout_ms
         self._client = Client(
@@ -89,51 +92,88 @@ class GeminiProvider(LLMProvider):
 
         config = genai_types.GenerateContentConfig(
             system_instruction=system_instruction,
+            automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
         )
 
-        try:
-            response = self._client.models.generate_content(
-                model=self._model,
-                contents=contents,
-                config=config,
+        max_transient_retries = 2
+        response = None
+
+        for attempt in range(max_transient_retries + 1):
+            try:
+                response = self._client.models.generate_content(
+                    model=self._model,
+                    contents=contents,
+                    config=config,
+                )
+                break
+            except genai_errors.ServerError as exc:
+                status = getattr(exc, "code", None)
+                if status == 503 and attempt < max_transient_retries:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                self._handle_server_error(exc)
+            except genai_errors.ClientError as exc:
+                self._handle_client_error(exc)
+            except Exception as exc:
+                self._handle_generic_error(exc)
+
+        if response is None:
+            raise LLMProviderError(
+                "Gemini did not return a response.",
+                code="LLM_EMPTY_RESPONSE",
             )
-        except genai_errors.ClientError as exc:
-            # 4xx errors: authentication failure, invalid request, etc.
-            status = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-            if status == 401 or status == 403:
-                raise LLMProviderError(
-                    "Gemini authentication failed. Verify your GEMINI_API_KEY.",
-                    code="LLM_AUTH_ERROR",
-                ) from exc
-            if status == 429:
-                raise LLMProviderError(
-                    "Gemini rate limit exceeded. Please retry later.",
-                    code="LLM_RATE_LIMIT",
-                ) from exc
-            raise LLMProviderError(
-                f"Gemini request error: {exc}",
-                code="LLM_CLIENT_ERROR",
-            ) from exc
-        except genai_errors.ServerError as exc:
-            raise LLMProviderError(
-                "Gemini server error. Please retry later.",
-                code="LLM_SERVER_ERROR",
-            ) from exc
-        except Exception as exc:
-            # Covers httpx timeout, connectivity issues, etc.
-            exc_name = type(exc).__name__
-            if "Timeout" in exc_name or "timeout" in str(exc).lower():
-                raise LLMProviderError(
-                    "Gemini request timed out.",
-                    code="LLM_TIMEOUT",
-                ) from exc
-            raise LLMProviderError(
-                "Unexpected error communicating with Gemini.",
-                code="LLM_PROVIDER_ERROR",
-            ) from exc
 
         text = self._extract_text(response)
         return LLMResponse(text=text, model=self._model, provider="gemini")
+
+    def _sanitize(self, message: str) -> str:
+        """Strip API key or sensitive credentials from error messages."""
+        if hasattr(self, "_api_key") and self._api_key and self._api_key in message:
+            return message.replace(self._api_key, "[REDACTED]")
+        return message
+
+    def _handle_server_error(self, exc: genai_errors.ServerError) -> None:
+        code = getattr(exc, "code", 500)
+        status_name = getattr(exc, "status", None) or "SERVER_ERROR"
+        raw_msg = self._sanitize(getattr(exc, "message", None) or "")
+        detail = f": {raw_msg}" if raw_msg else ". Please retry later."
+        raise LLMProviderError(
+            f"Gemini server error ({code} {status_name}){detail}",
+            code="LLM_SERVER_ERROR",
+        ) from exc
+
+    def _handle_client_error(self, exc: genai_errors.ClientError) -> None:
+        status = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+        if status in (401, 403):
+            raise LLMProviderError(
+                "Gemini authentication failed. Verify your GEMINI_API_KEY.",
+                code="LLM_AUTH_ERROR",
+            ) from exc
+        if status == 429:
+            raw_msg = self._sanitize(getattr(exc, "message", None) or "")
+            detail = f": {raw_msg}" if raw_msg else ". Please retry later."
+            raise LLMProviderError(
+                f"Gemini rate limit exceeded (429 RESOURCE_EXHAUSTED){detail}",
+                code="LLM_RATE_LIMIT",
+            ) from exc
+        raw_msg = self._sanitize(getattr(exc, "message", None) or str(exc))
+        raise LLMProviderError(
+            f"Gemini request error ({status or 400}): {raw_msg}",
+            code="LLM_CLIENT_ERROR",
+        ) from exc
+
+    def _handle_generic_error(self, exc: Exception) -> None:
+        exc_name = type(exc).__name__
+        if "Timeout" in exc_name or "timeout" in str(exc).lower():
+            raise LLMProviderError(
+                "Gemini request timed out.",
+                code="LLM_TIMEOUT",
+            ) from exc
+        raw_msg = self._sanitize(str(exc))
+        raise LLMProviderError(
+            f"Unexpected error communicating with Gemini: {raw_msg}",
+            code="LLM_PROVIDER_ERROR",
+        ) from exc
 
     # ------------------------------------------------------------------
     # Private helpers
