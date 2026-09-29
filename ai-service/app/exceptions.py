@@ -30,3 +30,14 @@ class SessionNotFoundError(AIServiceException):
             f"Conversation session '{conversation_id}' was not found.",
             code="SESSION_NOT_FOUND",
         )
+
+
+class LLMProviderError(AIServiceException):
+    """Raised when the LLM provider cannot fulfil a request.
+
+    Covers: missing API key, authentication failure, API errors,
+    rate limits, timeouts, and unexpected response formats.
+    """
+
+    def __init__(self, message: str, code: str = "LLM_PROVIDER_ERROR") -> None:
+        super().__init__(message, code=code)

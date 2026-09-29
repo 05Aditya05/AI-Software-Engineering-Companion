@@ -3,41 +3,64 @@ Chat service layer.
 
 Encapsulates conversational processing logic, separating business rules
 and state management from the FastAPI HTTP transport layer.
-In Phase 4, the LLM provider will be invoked directly inside this service.
+The LLMProvider abstraction is injected; the service has no knowledge
+of which specific provider is in use.
 """
 
 from datetime import datetime, timezone
-from typing import Any
 
-from app.exceptions import ValidationError
+from app.config import settings
+from app.exceptions import LLMProviderError, ValidationError
+from app.providers.base import LLMProvider, LLMResponse
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.conversation import ConversationManager
 from app.services.prompt import PromptBuilder
 
 
+def _build_default_provider() -> LLMProvider:
+    """Construct the default GeminiProvider from application settings.
+
+    Import is deferred to avoid importing Gemini SDK at module level
+    (keeps tests that mock the provider independent of the SDK).
+    """
+    from app.providers.gemini import GeminiProvider  # noqa: PLC0415
+
+    return GeminiProvider(
+        api_key=settings.gemini_api_key,
+        model=settings.gemini_model,
+        timeout_ms=settings.llm_timeout_ms,
+    )
+
+
 class ChatService:
     """
     Core service coordinating conversation state, prompt construction,
-    and response generation.
+    and LLM response generation.
     """
 
     def __init__(
         self,
         conversation_manager: ConversationManager | None = None,
         prompt_builder: PromptBuilder | None = None,
+        provider: LLMProvider | None = None,
     ) -> None:
         self.conversation_manager = conversation_manager or ConversationManager()
         self.prompt_builder = prompt_builder or PromptBuilder()
+        self._provider = provider  # None means "lazy-init on first call"
 
-    def process_message(self, request: ChatRequest) -> ChatResponse:
+    def process_message(
+        self,
+        request: ChatRequest,
+        project_context: str | None = None,
+    ) -> ChatResponse:
         """
         Process an incoming chat request through the core AI pipeline.
 
         1. Validates input
         2. Retrieves or initializes conversation session
         3. Retrieves prior message history
-        4. Constructs prompt messages
-        5. Generates reply (deterministic mock in Phase 3)
+        4. Constructs prompt messages (with optional project context)
+        5. Calls LLM provider
         6. Records conversation turns
         7. Returns structured ChatResponse
         """
@@ -57,15 +80,13 @@ class ChatService:
         prompt_messages = self.prompt_builder.build_prompt_messages(
             user_message=cleaned_message,
             history=history,
+            project_context=project_context,
         )
         prompt_summary = self.prompt_builder.format_debug_summary(prompt_messages)
 
-        # 5. Generate reply (clean hook for Phase 4 LLM provider)
-        reply_text = self._generate_reply(
-            user_message=cleaned_message,
-            prompt_messages=prompt_messages,
-            turn_count=len(history) // 2 + 1,
-        )
+        # 5. Generate reply via LLM provider
+        llm_response = self._call_provider(prompt_messages)
+        reply_text = llm_response.text
 
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -78,7 +99,7 @@ class ChatService:
         self.conversation_manager.add_assistant_message(
             conversation_id=conv_id,
             content=reply_text,
-            metadata={"mock": True, "turn": len(history) // 2 + 1},
+            metadata={"model": llm_response.model, "provider": llm_response.provider},
         )
 
         # 7. Construct structured response
@@ -89,32 +110,21 @@ class ChatService:
             timestamp=now_iso,
             status="success",
             meta={
-                "mock": True,
-                "phase": "phase-3",
-                "received_chars": len(cleaned_message),
+                "provider": llm_response.provider,
+                "model": llm_response.model,
                 "history_length": len(history),
                 "prompt_summary": prompt_summary,
             },
         )
 
-    def _generate_reply(
-        self,
-        user_message: str,
-        prompt_messages: list[dict[str, str]],
-        turn_count: int,
-    ) -> str:
-        """
-        Generate response text.
-
-        In Phase 3, this returns a deterministic structured mock response.
-        In Phase 4, this method will dispatch to the configured LLM provider.
-        """
-        return (
-            f"[AI Service Phase 3 Core] Received: \"{user_message}\". "
-            f"Active conversation turn #{turn_count} processed via service layer. "
-            f"Prompt constructed with {len(prompt_messages)} message context."
-        )
+    def _call_provider(self, prompt_messages: list[dict[str, str]]) -> LLMResponse:
+        """Resolve the provider (lazy-init if needed) and call it."""
+        if self._provider is None:
+            self._provider = _build_default_provider()
+        return self._provider.chat(prompt_messages)
 
 
-# Default singleton instance for dependency injection
+# Default singleton instance for dependency injection.
+# Provider is lazy-initialised on first request so that import-time
+# configuration errors are surfaced at runtime, not startup.
 default_chat_service = ChatService()

@@ -43,28 +43,25 @@ class Settings(BaseSettings):
         description="Node.js backend URL",
     )
 
-    # LLM configuration (provider abstraction — Phase 4)
-    llm_provider: str = Field(
-        default="openai",
-        description="LLM provider: openai, anthropic, google, ollama",
-    )
-    llm_api_key: str = Field(
+    # Gemini LLM configuration (Phase 4)
+    gemini_api_key: str = Field(
         default="",
-        description="API key for the LLM provider",
+        description="Gemini API key — loaded from GEMINI_API_KEY env var",
     )
-    llm_model: str = Field(
-        default="gpt-4o",
-        description="Model name to use",
+    gemini_model: str = Field(
+        default="gemini-2.0-flash",
+        description="Gemini model identifier",
+    )
+    llm_timeout_ms: int = Field(
+        default=30000,
+        ge=1000,
+        description="LLM request timeout in milliseconds",
     )
 
-    # Embedding configuration (Phase 9)
-    embedding_provider: str = Field(
-        default="openai",
-        description="Embedding provider",
-    )
-    embedding_model: str = Field(
-        default="text-embedding-3-small",
-        description="Embedding model name",
+    # Project understanding configuration (Phase 6)
+    project_root: str = Field(
+        default="",
+        description="Absolute path to the project root for project-understanding features",
     )
 
     model_config = {
