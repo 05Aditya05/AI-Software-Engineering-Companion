@@ -248,6 +248,81 @@ Phase 3 refactors the internal Python AI Service into a modular, clean, and test
 
 ### 3. Preparation for Phase 4 (LLM Provider Abstraction)
 
-The `ChatService._generate_reply` method serves as the clean isolation boundary. In Phase 4, this method will delegate to an abstract `LLMProvider` interface (OpenAI, Anthropic, Ollama, etc.) without altering the router, conversation manager, or API contract.
+The `ChatService._generate_reply` method serves as the clean isolation boundary. In Phase 4, this method was refactored to delegate to an abstract `LLMProvider` interface (`GeminiProvider`) without altering the router, conversation manager, or API contract.
+
+---
+
+## Phase 4: Real LLM Integration
+
+Phase 4 integrates Google Gemini (`google-genai` SDK) behind a strict provider abstraction:
+
+```
+FastAPI Router / ChatService
+        │
+        ▼
+   LLMProvider (abstract base class in app/providers/base.py)
+        │
+        ▼
+   GeminiProvider (app/providers/gemini.py)
+        │
+        ├─ Maps application roles (user, assistant, system) -> Gemini API formats
+        ├─ Extracts system instructions to GenerateContentConfig
+        ├─ Enforces timeouts via HttpOptions
+        └─ Converts SDK errors (ClientError, ServerError, APIError) -> LLMProviderError
+```
+
+- **Zero Leakage**: No Gemini-specific classes or types escape `app/providers/gemini.py`.
+- **Test Isolation**: ChatService, router, and conversation tests use deterministic mock/fake providers; no real API key is required during test runs.
+- **Error Mapping**: Provider failures (e.g. 401 Unauthorized, 429 Rate Limit, 500 Service Unavailable) map to structured HTTP 500 errors with machine-readable error codes.
+
+---
+
+## Phase 5: Conversational AI Assistant Persona & Multi-Turn Reasoning
+
+Phase 5 establishes the Software Engineering Companion persona and verifies conversational multi-turn workflows:
+
+- **Persona**: Specialized system prompt instructing the model to act as a pragmatic SE partner focusing on software design, code review, debugging root-cause analysis, and testing strategy.
+- **Boundaries**: Explicit disavowal of direct file modifications unless project context is provided; acknowledging uncertainty rather than hallucinating.
+- **Turn Accumulation**: Bounded session history retained across turns, enabling follow-up questions and context-aware technical recommendations.
+
+---
+
+## Phase 6: Project Understanding & Context Injection
+
+Phase 6 introduces controlled, read-only project inspection and context injection into conversational prompts:
+
+```
+[Incoming Chat Request]
+         │
+         ▼
+FastAPI Router (`app/routers/chat.py`)
+         │
+         ├─ Check `settings.project_root`
+         │
+         ├─ If configured:
+         │    `ProjectService(root).build_context()`
+         │    (walks directory structure, reads prioritized files up to budget caps)
+         │
+         ▼
+`ChatService.process_message(request, project_context=...)`
+         │
+         ▼
+`PromptBuilder.build_prompt_messages(..., project_context=...)`
+         │
+         ▼
+System Prompt with `--- Project Context ---` block injected
+         │
+         ▼
+LLM Provider (`GeminiProvider`)
+```
+
+### Safety and Security Guarantees:
+1. **Read-Only**: Zero shell execution, zero filesystem writes.
+2. **Path Traversal Protection**: All paths resolved against `project_root` with traversal detection (`../` escaping root raises `ValueError`).
+3. **Secret Protection**: `.env`, `.env.*`, `secrets.json`, `credentials.json`, private keys (`id_rsa`, etc.) are unconditionally excluded.
+4. **Directory Exclusions**: `node_modules`, `.git`, `.venv`, `dist`, `build`, `.next`, `__pycache__` are excluded from traversal.
+5. **Budgets & Caps**: Maximum 64 KB per file (`MAX_FILE_BYTES`), maximum 40 files (`MAX_FILES`), maximum 80,000 characters total context (`MAX_CONTEXT_CHARS`).
+6. **Graceful Fallback**: If project reading encounters any error or `project_root` is unset, chat continues normally without project context.
+
 
 
