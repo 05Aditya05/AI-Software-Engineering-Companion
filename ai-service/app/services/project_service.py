@@ -277,6 +277,18 @@ class ProjectService:
     # Private helpers
     # ------------------------------------------------------------------
 
+    def resolve_safe(self, relative_path: str) -> Path:
+        """Resolve a relative path safely within the project root.
+
+        Raises:
+            ValueError: If path escapes the project root.
+        """
+        return self._resolve_safe(relative_path)
+
+    def is_excluded_file(self, path: Path) -> bool:
+        """Return True if the file matches sensitive/excluded file patterns."""
+        return self._is_excluded_file(path)
+
     def _resolve_safe(self, relative_path: str) -> Path:
         """Resolve a relative path and verify it stays within the project root.
 
