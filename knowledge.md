@@ -44,8 +44,8 @@
 | **Phase 4** | `0e97ada` | **Real LLM Integration**: Google Gemini (`google-genai` SDK) का इंटीग्रेशन। `LLMProvider` एब्सट्रैक्शन, `GeminiProvider`, रोल मैपिंग (`user`, `model`, `system`), टाइमआउट और एरर कन्वर्जन। |
 | **Phase 5** | `22f75e6` | **Conversational AI Assistant Persona**: SE Companion का व्यवहार, स्पष्ट बाउंड्रीज़ (झूठा क्लेम न करना, अनिश्चितता स्वीकारना), और मल्टी-टर्न चैट हिस्ट्री रिटेंशन। |
 | **Phase 6** | `d6460cd` | **Project Understanding & Context Injection**: `ProjectService` बनाया गया जो प्रोजेक्ट रूट से सेफ, रीड-ओनली फ़ाइलें और स्ट्रक्चर पढ़कर LLM प्रॉम्प्ट में इंजेक्ट करता है। |
-| **Phase 7** | `3c7bfa6` | **Read-Only Tool System**: `ToolRegistry`, `PermissionLevel`, और 4 रीड-ओनली टूल्स (`list_files`, `read_file`, `search_code`, `inspect_file`) का सुरक्षित एग्जीक्यूशन फ्रेमवर्क। |
-| **Phase 8** | Pending commit | **Agent Orchestration**: `AgentOrchestrator` जो LLM और ToolRegistry के बीच बाउंडेड लूप (अधिकतम 3 स्टेप्स), सुरक्षित JSON डिसीजन पार्सिंग, और ChatService इंटीग्रेशन प्रदान करता है। |
+| **Phase 7** | `3c7bfa6` | **Read-Only Tool System**: `ToolRegistry`, `PermissionLevel`, और 4 रीड-ओनली टूल्स (`list_files`, `read_file`, `search_code`, `inspect_file`) का सुरक्षित एग्जीक्यूशन फ्रेमवर्क (36 टेस्ट्स)। |
+| **Phase 8** | `b47aa8a` | **Agent Orchestration**: `AgentOrchestrator` जो LLM और ToolRegistry के बीच बाउंडेड लूप (अधिकतम 3 स्टेप्स), सुरक्षित JSON डिसीजन पार्सिंग, टूल प्रॉम्प्ट इंजेक्शन, और ChatService इंटीग्रेशन प्रदान करता है (19 टेस्ट्स)। |
 
 ---
 
@@ -78,15 +78,22 @@ AI-Software-Engineering-Companion/
     │   ├── exceptions.py         <-- डोमेन एक्सेप्शन्स (LLMProviderError, ValidationError)
     │   ├── schemas/chat.py       <-- Pydantic मॉडल्स (ChatRequest, ChatResponse, ChatMessage)
     │   ├── providers/
-    │   │   ├── base.py           <-- LLMProvider एब्सट्रैक्ट क्लास
+    │   │   ├── base.py           <-- LLMProvider एब्सट्रैक्ट क्लास व LLMResponse
     │   │   └── gemini.py         <-- Google Gemini SDK प्रोवाइडर
+    │   ├── tools/                <-- [Phase 7] टूल सिस्टम
+    │   │   ├── base.py           <-- PermissionLevel, ToolDefinition, ToolResult
+    │   │   ├── registry.py       <-- ToolRegistry (रजिस्ट्रेशन, परमिशन चेक, एग्जीक्यूशन)
+    │   │   └── project_tools.py  <-- 4 रीड-ओनली टूल्स (list_files, read_file, search_code, inspect_file)
     │   ├── services/
-    │   │   ├── chat_service.py   <-- कोर चैट सर्विस
+    │   │   ├── chat_service.py   <-- कोर चैट सर्विस (Phase 8 में ToolRegistry व Orchestrator सपोर्ट)
+    │   │   ├── agent_orchestrator.py <-- [Phase 8] एजेंटिक लूप, JSON पार्सर, टूल कॉलिंग इंजन
     │   │   ├── conversation.py   <-- इन-मेमोरी सेशन व हिस्ट्री मैनेजर
     │   │   ├── prompt.py         <-- प्रॉम्प्ट बिल्डर व कॉन्टेक्स्ट कंपोज़र
     │   │   └── project_service.py<-- सेफ रीड-ओनली फ़ाइल व स्ट्रक्चर स्कैनर
-    │   └── routers/chat.py       <-- /api/chat/ एंडपॉइंट
-    ├── tests/                    <-- 80 कम्प्लीट यूनिट/इंटीग्रेशन टेस्ट्स
+    │   └── routers/chat.py       <-- /api/chat/ एंडपॉइंट (टूल रजिस्ट्री व प्रॉम्प्ट इंजेक्शन)
+    ├── tests/                    <-- 139 कम्प्लीट यूनिट/इंटीग्रेशन टेस्ट्स (Phase 1-8)
+    │   ├── test_tools.py         <-- Phase 7 के 36 टेस्ट्स
+    │   └── test_agent_orchestrator.py <-- Phase 8 के 19 टेस्ट्स
     └── requirements.txt
 ```
 
@@ -208,7 +215,145 @@ Phase 6 (`ProjectService`) में कई सुरक्षा लेयर�
 
 ---
 
-## 8. सामान्य समस्याएं और समाधान (Common Gotchas & Troubleshooting)
+## 8. फेज़ 7: रीड-ओनली टूल सिस्टम (Phase 7: Read-Only Tool System Deep Dive)
+
+### 8.1 आर्किटेक्चर और कोर कंपोनेंट्स (`app/tools/`)
+Phase 7 में AI Service के अंदर एक सुरक्षित, एक्सटेंसिबल और रीड-ओनली टूल सिस्टम लागू किया गया:
+
+1. **`PermissionLevel` Enum (`app/tools/base.py`):**
+   - `READ_ONLY`: सुरक्षित निरीक्षण टूल्स (फ़ाइल लिस्टिंग, पढ़ना, कोड खोजना, मेटाडेटा)।
+   - `PROMPT_CONFIRM`: वे ऑपरेशन्स जिनमें यूजर की मंज़ूरी आवश्यक होगी (भविष्य के फेज़ेज़ के लिए)।
+   - `EXECUTE_COMMAND`: शेल या टर्मिनल कमांड्स (सख्ती से नियंत्रित)।
+   - `ADMIN`: सिस्टम-लेवल या हाई-इम्पैक्ट एक्शन।
+   *वर्तमान गारंटी:* वर्तमान फेज़ केवल और केवल `READ_ONLY` टूल्स को ही रजिस्टर और एग्जीक्यूट करने की अनुमति देता है।
+
+2. **`ToolResult` Dataclass (`app/tools/base.py`):**
+   - हर टूल का रिस्पॉन्स स्ट्रक्चर्ड और प्रिडिक्टेबल होता है:
+     ```python
+     ToolResult.ok(tool_name="...", data={...}, metadata={...})
+     ToolResult.fail(tool_name="...", code="...", message="...", details={...})
+     ```
+   - यह JSON सीरियलाइज़ेबल है और Pydantic के साथ पूरी तरह संगत है।
+
+3. **`ToolRegistry` (`app/tools/registry.py`):**
+   - टूल्स का सेंट्रलाइज़्ड कैटलॉग।
+   - टूल एग्जीक्यूट करने से पहले परमिशन लेवल चेक करता है (`max_allowed_permission`).
+   - अगर कोई टूल `READ_ONLY` से ज़्यादा परमिशन मांगता है या अनरजिस्टर्ड है, तो `TOOL_PERMISSION_DENIED` या `TOOL_NOT_FOUND` एरर लौटाता है, सर्विस क्रैश नहीं होती।
+
+### 8.2 उपलब्ध 4 रीड-ओनली टूल्स (`app/tools/project_tools.py`)
+
+| टूल का नाम | काम (Description) | इनपुट पैरामीटर्स (Args) | सुरक्षा नियम |
+|---|---|---|---|
+| `list_files` | प्रोजेक्ट फ़ोल्डर का स्ट्रक्चर देखना | `path: str = "."`, `max_depth: int = 3` | डायरेक्टरी एक्सक्लूज़न (`.git`, `node_modules`, `.venv`), पाथ ट्रैवर्सल ब्लॉक |
+| `read_file` | किसी विशिष्ट फ़ाइल का कंटेंट पढ़ना | `path: str` | 64 KB साइज़ लिमिट, सीक्रेट फ़ाइलें ब्लॉक, सिर्फ़ टेक्स्ट फ़ाइलें |
+| `search_code` | प्रोजेक्ट में किसी शब्द/कोड को खोजना | `query: str`, `path: str = "."`, `max_results: int = 20`, `case_sensitive: bool = False` | सुरक्षित रीजीप-समान सर्च, एक्सक्लूडेड फ़ोल्डर्स को स्किप करना |
+| `inspect_file` | फ़ाइल का मेटाडेटा जानना | `path: str` | पाथ ट्रैवर्सल और सीक्रेट ब्लॉक, साइज़/लाइन्स/एक्सटेंशन/MTime लौटाना |
+
+---
+
+## 9. फेज़ 8: एजेंट ऑर्केस्ट्रेशन और टूल लूप (Phase 8: Agent Orchestration Deep Dive)
+
+### 9.1 एजेंटिक रीज़निंग लूप (`app/services/agent_orchestrator.py`)
+एजेंट ऑर्केस्ट्रेटर LLM और `ToolRegistry` के बीच एक नियंत्रित, बाउंडेड लूप (Bounded Loop) चलाता है:
+
+```
+User Prompt (+ Project Context + Tool Instructions)
+                      │
+                      ▼
+            ┌───────────────────┐
+            │   LLM Provider    │ ◄──────────────────────────────┐
+            └─────────┬─────────┘                                │
+                      │                                          │
+            [LLM Response / Decision]                            │
+                      │                                          │
+         Is it a Tool Call or Final Answer?                      │
+                      │                                          │
+      ┌───────────────┴───────────────┐                          │
+      ▼                               ▼                          │
+[Tool Call JSON]               [Final Answer]                    │
+      │                               │                          │
+Step < MAX_TOOL_STEPS (3)?            ▼                          │
+      │ No ──► Force Final Prompt ─► Return                      │
+      │ Yes                                                      │
+      ▼                                                          │
+ToolRegistry.execute()                                           │
+      │                                                          │
+[Tool Result Formatted] ─────────────────────────────────────────┘
+```
+
+### 9.2 टूल प्रॉम्प्ट का प्रारूप (Exact Tool Prompt Format)
+जब प्रोजेक्ट रूट सेट होता है, तो `build_tool_prompt_section` द्वारा सिस्टम प्रॉम्प्ट में निम्न निर्देश जोड़े जाते हैं:
+
+```text
+You have access to the following read-only project inspection tools.
+When you need to answer a question about this project's source code, structure, or files, you MUST use these tools rather than guessing.
+
+To use a tool, respond with ONLY a JSON block in this exact format:
+{"action": "tool", "tool": "<tool_name>", "arguments": {<args>}}
+
+Available tools:
+  - list_files: List files and directories within the project workspace.  Args: ['path', 'max_depth']
+  - read_file: Read the content of a project file (up to 64 KB).  Args: ['path']
+  - search_code: Search for a text string or code pattern across project files.  Args: ['query', 'path', 'max_results', 'case_sensitive']
+  - inspect_file: Inspect a file's metadata (size, lines, extension, modification time) without reading full content.  Args: ['path']
+
+Rules:
+- All tools are read-only. You cannot modify, create, or delete files.
+- You cannot execute shell commands.
+- Do NOT invent file contents. Use tools to obtain real data.
+- Tool results are authoritative. If a tool says a file does not exist, it does not exist.
+- If you do NOT need project information, answer directly without a tool call.
+- When answering, clearly state if information is unavailable.
+```
+
+### 9.3 टूल कॉल JSON और पार्सिंग लॉजिक
+1. **टूल कॉल इनवोकेशन सिंटैक्स:**
+   ```json
+   {
+     "action": "tool",
+     "tool": "search_code",
+     "arguments": {
+       "query": "ChatService",
+       "path": "."
+     }
+   }
+   ```
+2. **पार्सर की सहनशीलता (Robust Parsing):**
+   - ```` ```json ... ``` ```` वाले मार्कडाउन ब्लॉक को ऑटोमैटिकली डिटेक्ट करता है।
+   - सीधे टेक्स्ट में एम्बेडेड `{ ... }` को भी खोज निकालता है।
+   - यदि JSON अमान्य है, `action != "tool"`, या `tool` नाम गायब है, तो यह बिना क्रैश हुए इसे डायरेक्ट आंसर (Final Answer) मानकर यूजर को लौटा देता है।
+
+3. **लूप फीडबैक साइकिल (`[Tool Result]`):**
+   टूल रन होने के बाद उसका रिजल्ट LLM को इस फॉर्मेट में मिलता है:
+   ```text
+   [Tool Result]
+   {
+     "success": true,
+     "tool_name": "read_file",
+     "data": {
+       "path": "src/app.py",
+       "content": "def main():\n    return 'Hello World'\n"
+     }
+   }
+   ```
+
+4. **हार्ड स्टेप लिमिट (`MAX_TOOL_STEPS = 3`):**
+   - एक रिक्वेस्ट पर अधिकतम 3 टूल कॉल्स की अनुमति है।
+   - 3 स्टेप्स पूरे होने पर ऑर्केस्ट्रेटर LLM को स्पष्ट संदेश भेजता है: *"You have used the maximum number of tool calls. Please provide your final answer now based on the information gathered so far."*
+   - **डिफेंसिव प्रोटेक्शन:** यदि इसके बाद भी LLM फिर से टूल कॉल करता है, तो ऑर्केस्ट्रेटर टूल रन नहीं करता, बल्कि सुरक्षित फॉलबैक संदेश लौटा देता है।
+
+### 9.4 ChatService व API इंटीग्रेशन
+- `ChatService.process_message(..., tool_registry=...)`:
+  - जब `tool_registry` मौजूद होता है, तो कॉल `AgentOrchestrator` के ज़रिए जाती है।
+  - जब `tool_registry` नहीं होता, तो Phase 5/6 का डायरेक्ट-LLM पाथ चलता है (जीरो रिग्रेशन)।
+  - रिस्पॉन्स मेटाडेटा में `agent_steps_used` और `agent_tool_calls` दर्ज होते हैं।
+- `routers/chat.py`:
+  - `_get_tool_registry()` द्वारा लेज़ी-इनिशियलाइज़्ड रजिस्ट्री बनाता है।
+  - `default_chat_service` को ही टूल रजिस्ट्री इंजेक्ट करके इस्तेमाल करता है, जिससे टेस्ट्स में प्रोवाइडर मॉकिंग पूरी तरह बनी रहती है।
+
+---
+
+## 10. सामान्य समस्याएं और समाधान (Common Gotchas & Troubleshooting)
 
 1. **`LLM_SERVER_ERROR` या 500 एरर आना:**
    - **कारण:** `.env` में `GEMINI_MODEL=gemini-3.8-flash` लिखा होना।
@@ -217,3 +362,8 @@ Phase 6 (`ProjectService`) में कई सुरक्षा लेयर�
    - Windows पर सीधे `python` चलाने के बजाय हमेशा वर्चुअल एनवायरनमेंट वाला एग्जीक्यूटबल उपयोग करें: `.\.venv\Scripts\python.exe`.
 3. **API Key की सुरक्षा:**
    - अपनी असली API Key को कभी भी Git में कमिट न करें। असली की हमेशा केवल लोकल `.env` में रखें, जो `.gitignore` में सुरक्षित है।
+4. **LLMResponse instantiation में `raw` कीवर्ड:**
+   - `LLMResponse` क्लास (`app/providers/base.py`) में केवल 3 फ़ील्ड्स हैं: `text`, `model`, `provider`। कभी भी `raw={}` पास न करें।
+5. **यूनिट टेस्ट्स में Singleton Services:**
+   - `default_chat_service` को ही हमेशा इम्पोर्ट और टेस्ट्स में मॉकिंग के लिए उपयोग करें ताकि रूटर्स और सर्विस लेयर एक ही प्रोवाइडर इंस्टैंस शेयर करें।
+
