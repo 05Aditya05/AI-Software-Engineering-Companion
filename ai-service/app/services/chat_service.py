@@ -5,9 +5,15 @@ Encapsulates conversational processing logic, separating business rules
 and state management from the FastAPI HTTP transport layer.
 The LLMProvider abstraction is injected; the service has no knowledge
 of which specific provider is in use.
+
+Phase 8 adds optional AgentOrchestrator integration: when a ToolRegistry
+is present, requests are routed through the orchestrator's bounded tool
+loop.  When no registry is configured, the existing direct-LLM path is
+used (Phase 5/6 behaviour preserved).
 """
 
 from datetime import datetime, timezone
+from typing import Any
 
 from app.config import settings
 from app.exceptions import LLMProviderError, ValidationError
@@ -15,6 +21,7 @@ from app.providers.base import LLMProvider, LLMResponse
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.conversation import ConversationManager
 from app.services.prompt import PromptBuilder
+from app.tools.registry import ToolRegistry
 
 
 def _build_default_provider() -> LLMProvider:
@@ -36,6 +43,10 @@ class ChatService:
     """
     Core service coordinating conversation state, prompt construction,
     and LLM response generation.
+
+    When a *tool_registry* is provided the service delegates to the
+    AgentOrchestrator for tool-augmented reasoning.  Otherwise the
+    direct LLM call path is used (Phase 5/6 behaviour).
     """
 
     def __init__(
@@ -43,15 +54,18 @@ class ChatService:
         conversation_manager: ConversationManager | None = None,
         prompt_builder: PromptBuilder | None = None,
         provider: LLMProvider | None = None,
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         self.conversation_manager = conversation_manager or ConversationManager()
         self.prompt_builder = prompt_builder or PromptBuilder()
         self._provider = provider  # None means "lazy-init on first call"
+        self._tool_registry = tool_registry
 
     def process_message(
         self,
         request: ChatRequest,
         project_context: str | None = None,
+        tool_registry: ToolRegistry | None = None,
     ) -> ChatResponse:
         """
         Process an incoming chat request through the core AI pipeline.
@@ -60,7 +74,7 @@ class ChatService:
         2. Retrieves or initializes conversation session
         3. Retrieves prior message history
         4. Constructs prompt messages (with optional project context)
-        5. Calls LLM provider
+        5. Generates reply via LLM (direct or via AgentOrchestrator)
         6. Records conversation turns
         7. Returns structured ChatResponse
         """
@@ -84,9 +98,9 @@ class ChatService:
         )
         prompt_summary = self.prompt_builder.format_debug_summary(prompt_messages)
 
-        # 5. Generate reply via LLM provider
-        llm_response = self._call_provider(prompt_messages)
-        reply_text = llm_response.text
+        # 5. Generate reply — via orchestrator if tools available, else direct
+        active_registry = tool_registry if tool_registry is not None else self._tool_registry
+        reply_text, extra_meta = self._generate_reply(prompt_messages, tool_registry=active_registry)
 
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -99,29 +113,88 @@ class ChatService:
         self.conversation_manager.add_assistant_message(
             conversation_id=conv_id,
             content=reply_text,
-            metadata={"model": llm_response.model, "provider": llm_response.provider},
+            metadata=extra_meta.get("llm_meta"),
         )
 
         # 7. Construct structured response
+        meta: dict[str, Any] = {
+            "history_length": len(history),
+            "prompt_summary": prompt_summary,
+        }
+        meta.update(extra_meta)
+
         return ChatResponse(
             message=reply_text,
             source="ai-service",
             conversation_id=conv_id,
             timestamp=now_iso,
             status="success",
-            meta={
-                "provider": llm_response.provider,
-                "model": llm_response.model,
-                "history_length": len(history),
-                "prompt_summary": prompt_summary,
-            },
+            meta=meta,
         )
 
-    def _call_provider(self, prompt_messages: list[dict[str, str]]) -> LLMResponse:
-        """Resolve the provider (lazy-init if needed) and call it."""
+    # ------------------------------------------------------------------
+    # Reply generation
+    # ------------------------------------------------------------------
+
+    def _generate_reply(
+        self,
+        prompt_messages: list[dict[str, str]],
+        tool_registry: ToolRegistry | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """Generate a reply, routing through the orchestrator if tools exist.
+
+        Returns:
+            (reply_text, extra_metadata_dict)
+        """
+        provider = self._resolve_provider()
+
+        if tool_registry is not None:
+            return self._generate_via_orchestrator(provider, prompt_messages, tool_registry)
+
+        return self._generate_direct(provider, prompt_messages)
+
+    def _generate_direct(
+        self, provider: LLMProvider, prompt_messages: list[dict[str, str]]
+    ) -> tuple[str, dict[str, Any]]:
+        """Phase 5/6 direct-LLM path (no tools)."""
+        llm_response = provider.chat(prompt_messages)
+        meta = {
+            "provider": llm_response.provider,
+            "model": llm_response.model,
+            "llm_meta": {"model": llm_response.model, "provider": llm_response.provider},
+        }
+        return llm_response.text, meta
+
+    def _generate_via_orchestrator(
+        self,
+        provider: LLMProvider,
+        prompt_messages: list[dict[str, str]],
+        tool_registry: ToolRegistry,
+    ) -> tuple[str, dict[str, Any]]:
+        """Phase 8 orchestrator path (with tools)."""
+        from app.services.agent_orchestrator import AgentOrchestrator  # noqa: PLC0415
+
+        orchestrator = AgentOrchestrator(
+            provider=provider,
+            registry=tool_registry,
+        )
+        agent_response = orchestrator.process(prompt_messages)
+        meta: dict[str, Any] = {
+            "agent_steps_used": agent_response.steps_used,
+            "agent_tool_calls": agent_response.tool_calls_made,
+            "llm_meta": {},
+        }
+        return agent_response.message, meta
+
+    # ------------------------------------------------------------------
+    # Provider helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_provider(self) -> LLMProvider:
+        """Resolve the provider (lazy-init if needed)."""
         if self._provider is None:
             self._provider = _build_default_provider()
-        return self._provider.chat(prompt_messages)
+        return self._provider
 
 
 # Default singleton instance for dependency injection.

@@ -44,6 +44,8 @@
 | **Phase 4** | `0e97ada` | **Real LLM Integration**: Google Gemini (`google-genai` SDK) का इंटीग्रेशन। `LLMProvider` एब्सट्रैक्शन, `GeminiProvider`, रोल मैपिंग (`user`, `model`, `system`), टाइमआउट और एरर कन्वर्जन। |
 | **Phase 5** | `22f75e6` | **Conversational AI Assistant Persona**: SE Companion का व्यवहार, स्पष्ट बाउंड्रीज़ (झूठा क्लेम न करना, अनिश्चितता स्वीकारना), और मल्टी-टर्न चैट हिस्ट्री रिटेंशन। |
 | **Phase 6** | `d6460cd` | **Project Understanding & Context Injection**: `ProjectService` बनाया गया जो प्रोजेक्ट रूट से सेफ, रीड-ओनली फ़ाइलें और स्ट्रक्चर पढ़कर LLM प्रॉम्प्ट में इंजेक्ट करता है। |
+| **Phase 7** | `3c7bfa6` | **Read-Only Tool System**: `ToolRegistry`, `PermissionLevel`, और 4 रीड-ओनली टूल्स (`list_files`, `read_file`, `search_code`, `inspect_file`) का सुरक्षित एग्जीक्यूशन फ्रेमवर्क। |
+| **Phase 8** | Pending commit | **Agent Orchestration**: `AgentOrchestrator` जो LLM और ToolRegistry के बीच बाउंडेड लूप (अधिकतम 3 स्टेप्स), सुरक्षित JSON डिसीजन पार्सिंग, और ChatService इंटीग्रेशन प्रदान करता है। |
 
 ---
 
@@ -163,7 +165,7 @@ npm run dev
 ## 6. टेस्टिंग और वेरिफिकेशन चीटशीट (Testing & Verification)
 
 ### AI Service Tests (Pytest)
-सारे 80 टेस्ट्स चलाने के लिए:
+सारे 139 टेस्ट्स (Phase 1-8) चलाने के लिए:
 ```powershell
 cd e:\AI-Software-Engineering-Companion\ai-service
 .\.venv\Scripts\python.exe -m pytest tests/ -v
