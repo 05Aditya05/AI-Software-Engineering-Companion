@@ -104,11 +104,28 @@ router.post("/", async (req: Request, res: Response): Promise<void> => {
       console.error(
         `[Backend -> AI Service] Received HTTP ${aiServiceResponse.status} from ${targetUrl}`
       );
-      res.status(502).json({
+
+      let errorData: { error?: { code?: string; message?: string } } | null = null;
+      try {
+        errorData = (await aiServiceResponse.json()) as {
+          error?: { code?: string; message?: string };
+        };
+      } catch {
+        // Response body was not JSON
+      }
+
+      const upstreamCode = errorData?.error?.code;
+      const upstreamMessage = errorData?.error?.message;
+      const statusCode =
+        aiServiceResponse.status >= 400 && aiServiceResponse.status < 600
+          ? aiServiceResponse.status
+          : 502;
+
+      res.status(statusCode).json({
         status: "error",
         error: {
-          code: "AI_SERVICE_ERROR",
-          message: `AI service returned error status ${aiServiceResponse.status}.`,
+          code: upstreamCode || "AI_SERVICE_ERROR",
+          message: upstreamMessage || `AI service returned error status ${aiServiceResponse.status}.`,
         },
       } satisfies ChatErrorResponse);
       return;

@@ -366,4 +366,11 @@ Rules:
    - `LLMResponse` क्लास (`app/providers/base.py`) में केवल 3 फ़ील्ड्स हैं: `text`, `model`, `provider`। कभी भी `raw={}` पास न करें।
 5. **यूनिट टेस्ट्स में Singleton Services:**
    - `default_chat_service` को ही हमेशा इम्पोर्ट और टेस्ट्स में मॉकिंग के लिए उपयोग करें ताकि रूटर्स और सर्विस लेयर एक ही प्रोवाइडर इंस्टैंस शेयर करें।
+6. **Gemini 429 Quota / Rate Limit Handling:**
+   - जब Google Gemini API पर फ्री टियर कोटा समाप्त होता है (HTTP 429 `RESOURCE_EXHAUSTED`), तो AI Service इसे जेनेरिक 500 बनाने के बजाय HTTP 429 `LLM_RATE_LIMIT` के रूप में लौटाती है।
+   - Backend इस एरर कोड को ड्रॉप करने के बजाय Frontend को फॉरवर्ड करता है।
+   - Frontend इसे तुरंत पहचानकर स्पष्ट निर्देश दिखाता है: *"Gemini API quota/rate limit exceeded. Please retry later or use another configured model/provider."* (10 सेकंड के गलत टाइमआउट की जगह तत्काल रिस्पॉन्स)।
+7. **Agent Orchestration Timeout (`aiServiceTimeoutMs`):**
+   - Agentic Tool Loops में एकाधिक LLM कॉल्स (प्लानिंग + ऑब्जर्वेशन + फाइनल आंसर) होती हैं।
+   - Backend का डिफ़ॉल्ट टाइमआउट 10s से बढ़ाकर 60s किया गया है ताकि वैध टूल लूप 10 सेकंड पर prematurely abort न हो।
 

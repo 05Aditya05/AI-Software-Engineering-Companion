@@ -125,3 +125,26 @@ def test_chat_endpoint_provider_error_returns_500(client) -> None:
         assert data["error"]["code"] == "LLM_PROVIDER_ERROR"
     finally:
         cs_module.default_chat_service._provider = original
+
+
+def test_chat_endpoint_rate_limit_returns_429(client) -> None:
+    """POST /api/chat/ returns 429 when provider raises LLM_RATE_LIMIT."""
+    from app.exceptions import LLMProviderError
+    from app.providers.base import LLMProvider
+
+    class RateLimitProvider(LLMProvider):
+        def chat(self, messages):
+            raise LLMProviderError("Rate limit exceeded.", code="LLM_RATE_LIMIT")
+
+    from app.services import chat_service as cs_module
+    original = cs_module.default_chat_service._provider
+    cs_module.default_chat_service._provider = RateLimitProvider()
+    try:
+        response = client.post("/api/chat/", json={"message": "test rate limit"})
+        assert response.status_code == 429
+        data = response.json()
+        assert data["status"] == "error"
+        assert data["error"]["code"] == "LLM_RATE_LIMIT"
+        assert "Rate limit exceeded." in data["error"]["message"]
+    finally:
+        cs_module.default_chat_service._provider = original

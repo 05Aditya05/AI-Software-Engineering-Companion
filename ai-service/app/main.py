@@ -62,7 +62,19 @@ def create_app() -> FastAPI:
     # Exception handlers
     @app.exception_handler(AIServiceException)
     async def ai_service_exception_handler(_req: Request, exc: AIServiceException) -> JSONResponse:
-        status_code = 400 if exc.code == "VALIDATION_ERROR" else 500
+        if exc.code == "VALIDATION_ERROR":
+            status_code = 400
+        elif exc.code == "LLM_RATE_LIMIT":
+            status_code = 429
+        elif exc.code == "LLM_AUTH_ERROR":
+            status_code = 401
+        elif exc.code == "SESSION_NOT_FOUND":
+            status_code = 404
+        elif exc.code == "LLM_TIMEOUT":
+            status_code = 504
+        else:
+            status_code = 500
+
         return JSONResponse(
             status_code=status_code,
             content={

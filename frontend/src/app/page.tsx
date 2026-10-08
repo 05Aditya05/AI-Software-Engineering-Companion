@@ -125,9 +125,13 @@ export default function Home() {
       const data = await response.json();
 
       if (!response.ok) {
-        const errorMsg =
-          data?.error?.message ||
-          `Backend returned HTTP ${response.status}: ${response.statusText}`;
+        let errorMsg = data?.error?.message;
+        if (data?.error?.code === "LLM_RATE_LIMIT" || response.status === 429) {
+          errorMsg =
+            "Gemini API quota/rate limit exceeded. Please retry later or use another configured model/provider.";
+        } else if (!errorMsg) {
+          errorMsg = `Backend returned HTTP ${response.status}: ${response.statusText}`;
+        }
         setError(errorMsg);
         return;
       }
