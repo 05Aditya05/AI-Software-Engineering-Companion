@@ -141,11 +141,15 @@ def test_tool_registry_registration_and_lookup() -> None:
 
 
 def test_tool_registry_list_tools(tool_registry: ToolRegistry) -> None:
-    """list_tools returns all four registered read-only tools."""
+    """list_tools returns at least the four core read-only tools.
+
+    Phase 9.6: semantic_search may also be registered when DATABASE_URL and
+    GEMINI_API_KEY are configured, so the count can be 4 or 5.
+    """
     tools = tool_registry.list_tools()
     tool_names = [t["name"] for t in tools]
 
-    assert len(tools) == 4
+    assert len(tools) >= 4  # 4 core + optional semantic_search
     assert "list_files" in tool_names
     assert "read_file" in tool_names
     assert "search_code" in tool_names

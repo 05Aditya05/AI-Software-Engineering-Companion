@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Software Engineering Companion</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+    body {
+      background-color: #09090b;
+      color: #f4f4f5;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      text-align: center;
+      padding: 24px;
+    }
+    .card {
+      background: #18181b;
+      border: 1px border #27272a;
+      border-radius: 16px;
+      padding: 36px 32px;
+      max-width: 480px;
+      width: 100%;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .logo {
+      width: 52px;
+      height: 52px;
+      background: linear-gradient(135deg, #0891b2, #4f46e5);
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 20px;
+      color: #ffffff;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 12px rgba(8, 145, 178, 0.4);
+    }
+    h1 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #fafafa;
+    }
+    p {
+      font-size: 13px;
+      color: #a1a1aa;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 3px solid #27272a;
+      border-top-color: #06b6d4;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px auto;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #09090b;
+      border: 1px solid #27272a;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-family: monospace;
+      color: #71717a;
+      margin-bottom: 24px;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #eab308;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    button {
+      background: #0891b2;
+      color: #ffffff;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #06b6d4;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">AI</div>
+    <h1>Connecting to Companion Frontend</h1>
+    <p>Waiting for the Next.js frontend to become available at <code>http://localhost:3000</code>...</p>
+
+    <div class="spinner"></div>
+
+    <div>
+      <div class="status-badge">
+        <span class="status-dot"></span>
+        <span>Polling: http://localhost:3000</span>
+      </div>
+    </div>
+
+    <div>
+      <button id="retry-btn" onclick="retryConnection()">Retry Now</button>
+    </div>
+  </div>
+
+  <script>
+    async function checkFrontend() {
+      try {
+        const res = await fetch("http://localhost:3000/api/health", { cache: "no-store" });
+        if (res.ok) {
+          window.location.href = "http://localhost:3000";
+          return;
+        }
+      } catch {
+        // Not ready yet
+      }
+    }
+
+    function retryConnection() {
+      const btn = document.getElementById("retry-btn");
+      btn.textContent = "Connecting...";
+      btn.disabled = true;
+      checkFrontend().finally(() => {
+        btn.textContent = "Retry Now";
+        btn.disabled = false;
+      });
+    }
+
+    // Auto-poll every 3 seconds
+    setInterval(checkFrontend, 3000);
+    // Initial check
+    checkFrontend();
+  </script>
+</body>
+</html>

@@ -25,6 +25,8 @@ ai-service/.venv/
 .next/
 dist/
 build/
+out/
+.pytest_cache/
 
 # OS files → operating-system junk ignore kar
 .DS_Store
@@ -32,3 +34,4 @@ Thumbs.db
 
 # IDE → personal editor settings ignore kar
 .vscode/
+.idea/

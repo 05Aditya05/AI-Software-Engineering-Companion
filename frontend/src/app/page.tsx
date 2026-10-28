@@ -1,6 +1,11 @@
 "use client";
 
 import { useState, useEffect, useRef, FormEvent } from "react";
+import KnowledgePanel from "./components/KnowledgePanel";
+import MemoryPanel from "./components/MemoryPanel";
+import CodingAgentPanel from "./components/CodingAgentPanel";
+import GitPanel from "./components/GitPanel";
+import ObservabilityPanel from "./components/ObservabilityPanel";
 
 interface ChatMessage {
   id: string;
@@ -13,6 +18,9 @@ interface ChatMessage {
 }
 
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<
+    "chat" | "knowledge" | "memory" | "agent" | "git" | "observability"
+  >("chat");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -28,10 +36,29 @@ export default function Home() {
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
   const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3001/ws";
 
+  // Desktop Screen Context (Phase 14)
+  const [isDesktop, setIsDesktop] = useState(false);
+  const [screenPermissionGranted, setScreenPermissionGranted] = useState(false);
+  const [attachScreenContext, setAttachScreenContext] = useState(false);
+  const [screenCapturing, setScreenCapturing] = useState(false);
+
   // Auto-scroll to bottom of message list
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
+
+  // Detect Desktop companion & screen permission on mount
+  useEffect(() => {
+    if (typeof window !== "undefined" && (window as any).companionDesktop?.screenContext) {
+      setIsDesktop(true);
+      (window as any).companionDesktop.screenContext
+        .getPermission()
+        .then((res: { granted: boolean }) => {
+          setScreenPermissionGranted(res?.granted ?? false);
+        })
+        .catch(() => {});
+    }
+  }, []);
 
   // Establish WebSocket connection for real-time channel
   useEffect(() => {
@@ -85,6 +112,22 @@ export default function Home() {
     }
   };
 
+  const handleToggleScreenPermission = async () => {
+    if (typeof window === "undefined" || !(window as any).companionDesktop?.screenContext) return;
+    try {
+      if (screenPermissionGranted) {
+        await (window as any).companionDesktop.screenContext.revokePermission();
+        setScreenPermissionGranted(false);
+        setAttachScreenContext(false);
+      } else {
+        await (window as any).companionDesktop.screenContext.grantPermission();
+        setScreenPermissionGranted(true);
+      }
+    } catch (e) {
+      console.error("Failed to toggle screen permission:", e);
+    }
+  };
+
   // Send chat message via REST pipeline: Frontend -> Backend -> AI Service
   const handleSendMessage = async (e?: FormEvent, messageOverride?: string) => {
     if (e) e.preventDefault();
@@ -96,6 +139,20 @@ export default function Home() {
     }
 
     setError(null);
+
+    // Phase 14: On-demand screen context capture (explicit, single-frame)
+    let screenContextPayload: any = undefined;
+    if (attachScreenContext && isDesktop && screenPermissionGranted) {
+      try {
+        setScreenCapturing(true);
+        screenContextPayload = await (window as any).companionDesktop.screenContext.captureContext();
+      } catch (err: any) {
+        console.warn("Screen context capture failed or was denied:", err);
+      } finally {
+        setScreenCapturing(false);
+        setAttachScreenContext(false); // Reset to require explicit opt-in per message
+      }
+    }
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -119,6 +176,7 @@ export default function Home() {
         body: JSON.stringify({
           message: textToSend,
           conversationId: conversationId || undefined,
+          screenContext: screenContextPayload,
         }),
       });
 
@@ -183,7 +241,7 @@ export default function Home() {
             <h1 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
               AI Software Engineering Companion
               <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
-                Phase 2
+                Bridge
               </span>
             </h1>
             <p className="text-xs text-zinc-400">
@@ -229,7 +287,7 @@ export default function Home() {
             </span>
           )}
 
-          {messages.length > 0 && (
+          {messages.length > 0 && activeTab === "chat" && (
             <button
               onClick={handleClearChat}
               className="text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded border border-zinc-800 hover:border-zinc-700"
@@ -240,8 +298,117 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Chat Messages Body */}
-      <main className="flex-1 overflow-y-auto px-4 py-6 md:px-8 max-w-4xl w-full mx-auto space-y-4">
+      {/* Sub-header Navigation Tabs */}
+      <div className="border-b border-zinc-800 bg-zinc-900/40 px-6 py-2 flex items-center gap-2 text-xs overflow-x-auto">
+        <button
+          onClick={() => setActiveTab("chat")}
+          className={`px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
+            activeTab === "chat"
+              ? "bg-cyan-950 text-cyan-300 border border-cyan-800 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+          }`}
+        >
+          <span>💬</span>
+          <span>Companion Chat</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("knowledge")}
+          className={`px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
+            activeTab === "knowledge"
+              ? "bg-cyan-950 text-cyan-300 border border-cyan-800 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+          }`}
+        >
+          <span>📚</span>
+          <span>Project Knowledge (Phase 9)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("memory")}
+          className={`px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
+            activeTab === "memory"
+              ? "bg-indigo-950 text-indigo-300 border border-indigo-800 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+          }`}
+        >
+          <span>🧠</span>
+          <span>Long-Term Memory (Phase 10)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("agent")}
+          className={`px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
+            activeTab === "agent"
+              ? "bg-emerald-950 text-emerald-300 border border-emerald-800 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+          }`}
+        >
+          <span>⚡</span>
+          <span>Coding Agent (Phase 11)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("git")}
+          className={`px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
+            activeTab === "git"
+              ? "bg-teal-950 text-teal-300 border border-teal-800 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+          }`}
+        >
+          <span>🌿</span>
+          <span>Git Workspace (Phase 12)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("observability")}
+          className={`px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
+            activeTab === "observability"
+              ? "bg-purple-950 text-purple-300 border border-purple-800 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+          }`}
+        >
+          <span>📊</span>
+          <span>Observability (Phase 16)</span>
+        </button>
+      </div>
+
+      {/* Main Content Area */}
+      {activeTab === "knowledge" && (
+        <main className="flex-1 overflow-y-auto">
+          <KnowledgePanel backendUrl={backendUrl} />
+        </main>
+      )}
+
+      {activeTab === "memory" && (
+        <main className="flex-1 overflow-y-auto">
+          <MemoryPanel backendUrl={backendUrl} />
+        </main>
+      )}
+
+      {activeTab === "agent" && (
+        <main className="flex-1 overflow-y-auto">
+          <CodingAgentPanel backendUrl={backendUrl} />
+        </main>
+      )}
+
+      {activeTab === "git" && (
+        <main className="flex-1 overflow-y-auto">
+          <GitPanel backendUrl={backendUrl} />
+        </main>
+      )}
+
+      {activeTab === "observability" && (
+        <main className="flex-1 overflow-y-auto">
+          <ObservabilityPanel backendUrl={backendUrl} wsStatus={wsStatus} />
+        </main>
+      )}
+
+      {activeTab === "chat" && (
+        <>
+          {/* Chat Messages Body */}
+          <main className="flex-1 overflow-y-auto px-4 py-6 md:px-8 max-w-4xl w-full mx-auto space-y-4">
+
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-6">
             <div className="max-w-md space-y-2">
@@ -351,36 +518,97 @@ export default function Home() {
         <div ref={messagesEndRef} />
       </main>
 
-      {/* Message Input Footer */}
-      <footer className="border-t border-zinc-800 bg-zinc-900/60 backdrop-blur p-4">
-        <form
-          onSubmit={(e) => handleSendMessage(e)}
-          className="max-w-4xl mx-auto flex items-center gap-2"
-        >
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Type a message to test the companion pipeline..."
-            disabled={isLoading}
-            className="flex-1 bg-zinc-950 border border-zinc-800 focus:border-cyan-500 focus:outline-none rounded-xl px-4 py-2.5 text-sm text-zinc-100 placeholder-zinc-500 transition-colors disabled:opacity-50"
-          />
-          <button
-            type="submit"
-            disabled={isLoading || !input.trim()}
-            className="bg-cyan-600 hover:bg-cyan-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition-colors flex items-center gap-1.5"
-          >
-            {isLoading ? (
-              <span>Sending...</span>
-            ) : (
-              <>
-                <span>Send</span>
-                <span className="text-xs">&rarr;</span>
-              </>
-            )}
-          </button>
-        </form>
-      </footer>
+          {/* Message Input Footer with Phase 14 Screen Context Controls */}
+          <footer className="border-t border-zinc-800 bg-zinc-900/60 backdrop-blur p-4 space-y-2.5">
+            {/* Screen Context Status & Permission Bar */}
+            <div className="max-w-4xl mx-auto flex items-center justify-between text-xs text-zinc-400 bg-zinc-950/60 border border-zinc-800/80 rounded-lg px-3 py-1.5">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-zinc-300">🖥️ Screen Context:</span>
+                {isDesktop ? (
+                  screenPermissionGranted ? (
+                    <span className="text-emerald-400 font-medium flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Authorized
+                    </span>
+                  ) : (
+                    <span className="text-zinc-500 font-medium">Disabled (Explicit consent required)</span>
+                  )
+                ) : (
+                  <span className="text-zinc-500 italic">Desktop Companion required</span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3">
+                {isDesktop && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleToggleScreenPermission}
+                      className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
+                        screenPermissionGranted
+                          ? "bg-red-950/50 text-red-300 border-red-800 hover:bg-red-900/50"
+                          : "bg-cyan-950/50 text-cyan-300 border-cyan-800 hover:bg-cyan-900/50"
+                      }`}
+                    >
+                      {screenPermissionGranted ? "Revoke Permission" : "Grant Permission"}
+                    </button>
+
+                    {screenPermissionGranted && (
+                      <label className="flex items-center gap-1.5 cursor-pointer text-zinc-300 select-none">
+                        <input
+                          type="checkbox"
+                          checked={attachScreenContext}
+                          onChange={(e) => setAttachScreenContext(e.target.checked)}
+                          disabled={isLoading || screenCapturing}
+                          className="rounded border-zinc-700 bg-zinc-900 text-cyan-500 focus:ring-0 w-3.5 h-3.5"
+                        />
+                        <span className="text-[11px]">Attach screen frame to send</span>
+                      </label>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+
+            <form
+              onSubmit={(e) => handleSendMessage(e)}
+              className="max-w-4xl mx-auto flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    if (!isLoading && input.trim()) {
+                      handleSendMessage();
+                    }
+                  }
+                }}
+                placeholder="Type a message (Ctrl+Enter to send)..."
+                disabled={isLoading}
+                className="flex-1 bg-zinc-950 border border-zinc-800 focus:border-cyan-500 focus:outline-none rounded-xl px-4 py-2.5 text-sm text-zinc-100 placeholder-zinc-500 transition-colors disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={isLoading || !input.trim()}
+                className="bg-cyan-600 hover:bg-cyan-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition-colors flex items-center gap-1.5"
+              >
+                {isLoading ? (
+                  <span>{screenCapturing ? "Capturing..." : "Sending..."}</span>
+                ) : (
+                  <>
+                    <span>Send</span>
+                    <span className="text-xs">&rarr;</span>
+                  </>
+                )}
+              </button>
+            </form>
+          </footer>
+        </>
+      )}
     </div>
   );
 }
+

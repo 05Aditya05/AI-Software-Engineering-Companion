@@ -281,23 +281,49 @@ class AgentOrchestrator:
         return self._provider.chat(messages)
 
     def _execute_tool(self, decision: AgentDecision) -> ToolResult:
-        """Validate and execute a tool call through the registry."""
+        """Validate and execute a tool call through the registry with telemetry tracing."""
+        import time
+        from app.services.telemetry import default_telemetry_service
+
         tool_name = decision.tool or ""
 
         # 1. Registry existence check
         if not self._registry.has_tool(tool_name):
+            err_msg = f"Tool '{tool_name}' is not registered."
+            default_telemetry_service.record_tool_execution(
+                tool_name=tool_name,
+                arguments=decision.arguments,
+                duration_ms=0.0,
+                success=False,
+                error_message=err_msg,
+            )
             return ToolResult.fail(
                 tool_name=tool_name,
                 code="TOOL_NOT_FOUND",
-                message=f"Tool '{tool_name}' is not registered.",
+                message=err_msg,
             )
 
         # 2. Execute through registry (includes permission check)
-        return self._registry.execute(
+        t0 = time.perf_counter()
+        result = self._registry.execute(
             name=tool_name,
             params=decision.arguments,
             max_allowed_permission=PermissionLevel.READ_ONLY,
         )
+        duration_ms = (time.perf_counter() - t0) * 1000
+
+        try:
+            default_telemetry_service.record_tool_execution(
+                tool_name=tool_name,
+                arguments=decision.arguments,
+                duration_ms=duration_ms,
+                success=result.success,
+                error_message=result.error.message if result.error else None,
+            )
+        except Exception:
+            pass
+
+        return result
 
     @staticmethod
     def _format_tool_result(result: ToolResult) -> str:

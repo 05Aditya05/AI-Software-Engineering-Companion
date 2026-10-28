@@ -41,6 +41,23 @@ class ChatMessage(BaseModel):
     )
 
 
+class ScreenContextPayload(BaseModel):
+    """
+    Structured payload for user-permitted screen context capture (Phase 14).
+    
+    Guarantees:
+      - Explicit user permission required (user_granted_permission must be True).
+      - Ephemeral context: never persisted to long-term memory.
+      - Includes window title and optional base64 image data.
+    """
+    image_base64: str | None = Field(default=None, description="Base64-encoded image data")
+    mime_type: str = Field(default="image/jpeg", description="MIME type of screen capture")
+    window_title: str | None = Field(default=None, description="Title of the captured window")
+    display_name: str | None = Field(default=None, description="Display/monitor identifier")
+    user_granted_permission: bool = Field(default=False, description="Whether user explicitly granted permission")
+    captured_at: str | None = Field(default=None, description="ISO timestamp of capture")
+
+
 class ChatRequest(BaseModel):
     """Payload sent to the AI service to initiate or continue a chat."""
 
@@ -58,6 +75,10 @@ class ChatRequest(BaseModel):
     client_metadata: dict[str, Any] | None = Field(
         default=None,
         description="Optional client context or metadata."
+    )
+    screen_context: ScreenContextPayload | None = Field(
+        default=None,
+        description="Optional user-permitted screen context (Phase 14)."
     )
 
 

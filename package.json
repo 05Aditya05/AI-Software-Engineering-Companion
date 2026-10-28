@@ -13,7 +13,16 @@
     "install:frontend": "cd frontend && npm install",
     "install:backend": "cd backend && npm install",
     "install:ai": "cd ai-service && .venv\\Scripts\\pip.exe install -r requirements.txt",
-    "install:all": "npm run install:frontend && npm run install:backend && npm run install:ai"
+    "install:desktop": "cd desktop && npm install",
+    "install:all": "npm run install:frontend && npm run install:backend && npm run install:ai && npm run install:desktop",
+    "dev:desktop": "cd desktop && npm start",
+    "test:desktop": "cd desktop && npm test",
+    "test:backend": "cd backend && npm test",
+    "docker:db": "docker compose up -d db",
+    "docker:full": "docker compose --profile full up -d",
+    "docker:down": "docker compose --profile full down",
+    "docker:config": "docker compose --profile full config",
+    "verify:stack": "ai-service\\.venv\\Scripts\\python.exe scripts/verify_stack.py"
   },
   "author": "Aaditya Sharma",
   "license": "ISC"

@@ -15,6 +15,11 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.exceptions import AIServiceException
 from app.routers import health, chat
+from app.routers import knowledge as knowledge_router
+from app.routers import memory as memory_router
+from app.routers import coding_agent as coding_agent_router
+from app.routers import git as git_router
+from app.routers import observability as observability_router
 
 
 @asynccontextmanager
@@ -89,6 +94,11 @@ def create_app() -> FastAPI:
     # Mount routers
     app.include_router(health.router, prefix="/api/health")
     app.include_router(chat.router, prefix="/api/chat")
+    app.include_router(knowledge_router.router, prefix="/api/knowledge")
+    app.include_router(memory_router.router, prefix="/api/memory")
+    app.include_router(coding_agent_router.router, prefix="/api/agent")
+    app.include_router(git_router.router, prefix="/api/git")
+    app.include_router(observability_router.router, prefix="/api/observability")
 
     # Root endpoint
     @app.get("/")

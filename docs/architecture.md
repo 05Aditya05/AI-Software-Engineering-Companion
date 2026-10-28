@@ -324,5 +324,173 @@ LLM Provider (`GeminiProvider`)
 5. **Budgets & Caps**: Maximum 64 KB per file (`MAX_FILE_BYTES`), maximum 40 files (`MAX_FILES`), maximum 80,000 characters total context (`MAX_CONTEXT_CHARS`).
 6. **Graceful Fallback**: If project reading encounters any error or `project_root` is unset, chat continues normally without project context.
 
+---
+
+## Phase 7: Tool System & Permission Engine
+
+Phase 7 introduces structured tool definitions and a permission validation engine:
+
+- **`Tool` Base Class**: Abstract contract specifying `name`, `description`, `permission_level`, `input_schema` (JSON Schema), and `execute(params) -> ToolResult`.
+- **`PermissionLevel`**: Enum defining security boundaries (`READ_ONLY`, `WRITE`, `EXECUTE`, `DESTRUCTIVE`). Default agent permissions are capped at `READ_ONLY`.
+- **Read-Only Project Inspection Tools**:
+  - `read_file`: Reads specific file contents with line-range slicing and size bounds.
+  - `list_files`: Recursively lists directories with path traversal guards and file-type filtering.
+  - `search_code`: Performs regex or substring searches across indexed project files.
+  - `inspect_file`: Returns file metadata (size, line count, extension, permissions).
+- **Safe Execution Boundary**: The `ToolRegistry` catches any unexpected tool exception and wraps it in a normalized `ToolResult.fail(code, message)`, preventing unhandled crashes from escaping into the orchestrator.
+
+---
+
+## Phase 8: Agent Orchestration (ReAct Loop)
+
+Phase 8 implements multi-step autonomous reasoning using a ReAct (Reason + Act) loop:
+
+```
+User Prompt
+     │
+     ▼
+AgentOrchestrator
+     │
+     ├─ Step 1: Model generates reasoning + tool call: {"tool": "search_code", "params": {...}}
+     │   │
+     │   ├─ Registry executes tool safely
+     │   └─ Observation injected back into turn context
+     │
+     ├─ Step 2: Model processes observation -> determines next action or final answer
+     │
+     └─ Terminates on:
+         • Explicit final answer
+         • `max_steps` reached (default: 5)
+         • Fatal permission violation
+```
+
+- **Step Bounding**: Guaranteed termination within `max_steps` to prevent runaway loops or unbounded token consumption.
+- **Trace Accumulation**: Step-by-step tool traces recorded in memory for auditability.
+
+---
+
+## Phase 9: RAG & PostgreSQL pgvector Database
+
+Phase 9 integrates persistent semantic search over project knowledge:
+
+- **Vector Storage**: PostgreSQL 17 with the `pgvector` extension running in a containerized environment (`companion-postgres`).
+- **Embedding Provider**: `GeminiEmbeddingProvider` using the `gemini-embedding-001` model (768 dimensions).
+- **Chunking Pipeline**: `KnowledgeChunker` splits code and markdown documents with configurable token overlap and syntax awareness.
+- **Cosine Similarity Retrieval**: `RetrievalService` executes cosine distance vector queries (`<=>` operator) against stored embeddings.
+- **Dynamic Tool Registration**: `SemanticSearchTool` is conditionally registered in `ToolRegistry` when both `DATABASE_URL` and `GEMINI_API_KEY` are configured.
+
+---
+
+## Phase 10: Long-Term Memory & Cross-Project Learning
+
+Phase 10 provides a cross-project repository of accumulated engineering wisdom:
+
+- **Memory Entity**: Stores categorized engineering lessons (`decision`, `debugging_lesson`, `solution`, `preference`, `failed_approach`) with vector embeddings.
+- **Contextual Filtering**: Learned memory is never blindly injected. Retrieved memories are scored against current project architecture before recommendations are formulated.
+- **Tool Integration**: `SearchMemoryTool` allows the ReAct orchestrator to query past lessons relevant to the active problem.
+
+---
+
+## Phase 11: Testing & Debugging Agent Loop
+
+Phase 11 implements autonomous error diagnosis and self-healing proposals:
+
+- **`CodingAgent`**: Specialized workflow that executes test suites via subprocess within sandboxed working directories.
+- **Failure Analysis**: Parses pytest, vitest, and tsc error outputs, identifying failing test cases and stack traces.
+- **Self-Healing Proposal Loop**: Formulates non-destructive code patches (diff proposals) displayed in the frontend for developer review before any filesystem changes occur.
+
+---
+
+## Phase 12: Git Integration
+
+Phase 12 provides safe, human-in-the-loop source control awareness:
+
+- **`GitService`**: Safe wrapper around Git CLI executing read-only commands (`git status`, `git log`, `git diff`, `git branch`).
+- **`GitInfoTool`**: Exposes read-only Git status and history to the conversational agent.
+- **Commit Proposals**: Synthesizes conventional commit messages and staged diff summaries without performing autonomous write operations.
+- **`GitPanel`**: Dedicated workspace UI component in Next.js displaying repository status, commit logs, and interactive diff viewers.
+
+---
+
+## Phase 13: Windows Desktop Companion
+
+Phase 13 packages the companion as a native Windows desktop experience:
+
+- **Electron 34 Architecture**: Multi-process design separating Node.js main process, secure IPC preload, and isolated renderer window.
+- **System Tray**: Persistent Windows notification tray icon with quick actions (Show/Hide, DevTools, Restart Services, Quit).
+- **Global Hotkeys**: `Ctrl+Alt+C` global shortcut toggles the desktop companion window from any application.
+- **`ProcessManager`**: Probes local service health (`/api/health`) and renders a graceful offline fallback UI while services initialize.
+
+---
+
+## Phase 14: Screen Context & Permissions
+
+Phase 14 allows visual debugging with strict privacy and trust boundaries:
+
+- **Desktop Capturer**: Uses Electron `desktopCapturer.getSources` to capture application windows or displays.
+- **Downscaled Previews**: Captures are downscaled to 1280x720 JPEG thumbnails to prevent memory exhaustion and excessive token load.
+- **Explicit Trust Boundary**: All screen capture requests require affirmative user selection and confirmation. Client-supplied flags cannot bypass the native dialog.
+- **Turn Isolation**: Screen captures are strictly bound to the immediate conversation turn and discarded from subsequent history.
+
+---
+
+## Phase 15: Docker & Infrastructure
+
+Phase 15 provides production-ready containerization for the entire stack:
+
+- **Multi-Stage Dockerfiles**:
+  - `ai-service`: `python:3.12-slim` with compiled wheels, non-root user `appuser`, and uvicorn server.
+  - `backend`: `node:22-alpine` builder (`tsc`) + minimal runtime, non-root `node` user.
+  - `frontend`: `node:22-alpine` Next.js production server, non-root `node` user.
+- **Docker Compose Profiles**:
+  - Base profile (`docker compose up -d db`): Launches `companion-postgres` (`pgvector/pgvector:pg17`).
+  - Full profile (`docker compose --profile full up -d`): Launches all 4 containers with healthcheck dependencies and internal DNS.
+
+---
+
+## Phase 16: Evaluation & Observability
+
+Phase 16 establishes comprehensive instrumentation, telemetry, and evaluation:
+
+```
+Chat Turn / Tool Invocation
+             │
+             ▼
+TelemetryService (ai-service/app/services/telemetry.py)
+   • Thread-safe bounded deque (100 turns, 200 tool traces)
+   • Sensitive data sanitization (API keys, passwords, base64 payloads)
+   • Token estimations (~4 chars/token heuristic, labeled explicitly)
+             │
+             ▼
+FastAPI Observability Router (`/api/observability/metrics`, `/traces`)
+             │
+             ▼
+Express API Gateway Proxy (`/api/observability/*`)
+             │
+             ▼
+Frontend ObservabilityPanel (Next.js)
+   • Live Service Health Grid (Backend, AI Service, DB, WebSocket)
+   • Turn Performance Summary & Token Totals
+   • Tool Usage Distribution Chart
+   • Audit Trace Table with argument inspection and outcome filters
+```
+
+- **Evaluation Benchmark Suite**: Deterministic automated tests in `tests/test_evaluation.py` assessing tool parsing accuracy, permission denial safety, injection resistance, and argument redaction.
+
+---
+
+## Phase 17: Polish, Documentation & Full-Stack Deployment Verification
+
+Phase 17 finalizes the developer experience and system verification:
+
+- **UI Polish**: Standardized loading spinners, empty states, keyboard shortcuts (`Ctrl+Enter`), and error notifications across all 6 workspace panels.
+- **Automated Verification Script (`scripts/verify_stack.py`)**:
+  - Validates core and optional tool registrations.
+  - Verifies PostgreSQL connectivity and `vector` extension status.
+  - Validates Docker Compose base and full profiles via `docker compose config`.
+  - Verifies telemetry aggregation and secret redaction.
+  - Probes live service health endpoints with meaningful exit codes (0 for pass, 1 for failure, 2 for live check failure).
+
+
 
 

@@ -5,7 +5,7 @@ Loads settings from environment variables using Pydantic Settings.
 All configuration access should go through this module.
 """
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
 
 
@@ -70,6 +70,18 @@ class Settings(BaseSettings):
         description="LLM request timeout in milliseconds",
     )
 
+    # Gemini Embedding configuration (Phase 9.2)
+    embedding_model: str = Field(
+        default="gemini-embedding-001",
+        description="Gemini embedding model identifier",
+    )
+
+    # PostgreSQL connection (Phase 9.1)
+    database_url: SecretStr = Field(
+        default=SecretStr(""),
+        description="Async PostgreSQL URL loaded from DATABASE_URL; never log this value",
+    )
+
     # Project understanding configuration (Phase 6)
     project_root: str = Field(
         default="",
@@ -80,6 +92,7 @@ class Settings(BaseSettings):
         "env_file": ".env",
         "env_file_encoding": "utf-8",
         "case_sensitive": False,
+        "extra": "ignore",
     }
 
 

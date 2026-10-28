@@ -96,6 +96,7 @@ router.post("/", async (req: Request, res: Response): Promise<void> => {
       body: JSON.stringify({
         message: cleanedMessage,
         conversation_id: activeConversationId,
+        screen_context: (body as any).screen_context ?? (body as any).screenContext,
       }),
       signal: AbortSignal.timeout(config.aiServiceTimeoutMs),
     });

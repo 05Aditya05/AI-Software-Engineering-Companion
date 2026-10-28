@@ -148,3 +148,173 @@ def test_chat_endpoint_rate_limit_returns_429(client) -> None:
         assert "Rate limit exceeded." in data["error"]["message"]
     finally:
         cs_module.default_chat_service._provider = original
+
+
+# ---------------------------------------------------------------------------
+# Phase 9: Knowledge Index Endpoint Tests
+# ---------------------------------------------------------------------------
+
+
+def test_knowledge_index_missing_project_root(client) -> None:
+    """POST /api/knowledge/index returns 503 if PROJECT_ROOT is empty."""
+    with patch("app.routers.knowledge.settings") as mock_settings:
+        mock_settings.project_root = ""
+        response = client.post("/api/knowledge/index")
+        assert response.status_code == 503
+        assert "PROJECT_ROOT is not configured" in response.json()["detail"]
+
+
+def test_knowledge_index_missing_database_url(client) -> None:
+    """POST /api/knowledge/index returns 503 if DATABASE_URL is empty."""
+    with patch("app.routers.knowledge.settings") as mock_settings:
+        mock_settings.project_root = "/path/to/project"
+        mock_settings.database_url.get_secret_value.return_value = ""
+        response = client.post("/api/knowledge/index")
+        assert response.status_code == 503
+        assert "DATABASE_URL is not configured" in response.json()["detail"]
+
+
+def test_knowledge_index_missing_api_key(client) -> None:
+    """POST /api/knowledge/index returns 503 if GEMINI_API_KEY is empty."""
+    with patch("app.routers.knowledge.settings") as mock_settings:
+        mock_settings.project_root = "/path/to/project"
+        mock_settings.database_url.get_secret_value.return_value = "postgresql+asyncpg://mock"
+        mock_settings.gemini_api_key = ""
+        response = client.post("/api/knowledge/index")
+        assert response.status_code == 503
+        assert "GEMINI_API_KEY is not configured" in response.json()["detail"]
+
+
+def test_knowledge_index_success(client) -> None:
+    """POST /api/knowledge/index triggers incremental_index and returns 200."""
+    from unittest.mock import AsyncMock
+    from app.knowledge.indexer import IndexSummary
+
+    fake_summary = IndexSummary(
+        indexed_files=["app/main.py"],
+        skipped_files=["README.md"],
+        removed_files=[],
+        failed_files=[],
+        indexed_chunks=3,
+        removed_chunks=0,
+        errors={},
+    )
+
+    async def fake_get_session():
+        yield AsyncMock()
+
+    with (
+        patch("app.routers.knowledge.settings") as mock_settings,
+        patch("app.routers.knowledge.ProjectService") if False else patch("app.db.get_session", fake_get_session),
+        patch("app.knowledge.storage.ensure_unique_constraint", AsyncMock()),
+        patch("app.knowledge.indexer.incremental_index", AsyncMock(return_value=fake_summary)),
+        patch("app.providers.embedding.GeminiEmbeddingProvider"),
+        patch("app.services.project_service.ProjectService"),
+    ):
+        mock_settings.project_root = "e:/test-project"
+        mock_settings.database_url.get_secret_value.return_value = "postgresql+asyncpg://mock"
+        mock_settings.gemini_api_key = "test-key"
+        mock_settings.embedding_model = "gemini-embedding-001"
+
+        response = client.post("/api/knowledge/index")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["indexed_files"] == 1
+        assert data["skipped_files"] == 1
+        assert data["indexed_chunks"] == 3
+        assert data["failed_files"] == 0
+
+
+def test_knowledge_index_failure(client) -> None:
+    """POST /api/knowledge/index handles exceptions and returns 500."""
+    async def fake_get_session():
+        yield "mock_session"
+
+    with (
+        patch("app.routers.knowledge.settings") as mock_settings,
+        patch("app.db.get_session", fake_get_session),
+        patch("app.providers.embedding.GeminiEmbeddingProvider"),
+        patch("app.services.project_service.ProjectService"),
+        patch("app.knowledge.indexer.incremental_index", side_effect=RuntimeError("Index failed")),
+    ):
+        mock_settings.project_root = "e:/test-project"
+        mock_settings.database_url.get_secret_value.return_value = "postgresql+asyncpg://mock"
+        mock_settings.gemini_api_key = "test-key"
+        mock_settings.embedding_model = "gemini-embedding-001"
+
+        response = client.post("/api/knowledge/index")
+        assert response.status_code == 500
+        assert "Indexing failed" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 14: Screen Context Endpoint Tests
+# ---------------------------------------------------------------------------
+
+
+def test_chat_endpoint_with_screen_context_permitted(client) -> None:
+    """POST /api/chat/ with permitted screen_context attaches metadata."""
+    payload = {
+        "message": "What is on my screen?",
+        "screen_context": {
+            "user_granted_permission": True,
+            "window_title": "VS Code — app.py",
+            "display_name": "Display 1",
+            "image_base64": "ZmFrZS1qcGVn",
+            "mime_type": "image/jpeg",
+        },
+    }
+    response = client.post("/api/chat/", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["meta"].get("screen_context_attached") is True
+    assert data["meta"].get("screen_window_title") == "VS Code — app.py"
+
+
+def test_chat_endpoint_with_screen_context_denied(client) -> None:
+    """POST /api/chat/ with ungranted screen_context does not attach screen meta."""
+    payload = {
+        "message": "What is on my screen?",
+        "screen_context": {
+            "user_granted_permission": False,
+            "window_title": "Private Window",
+        },
+    }
+    response = client.post("/api/chat/", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert "screen_context_attached" not in data.get("meta", {})
+
+
+# ---------------------------------------------------------------------------
+# Phase 16: Observability Endpoint Tests
+# ---------------------------------------------------------------------------
+
+
+def test_observability_metrics_endpoint(client) -> None:
+    """GET /api/observability/metrics returns aggregated telemetry metrics."""
+    response = client.get("/api/observability/metrics")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert "summary" in data
+    assert "total_turns" in data["summary"]
+    assert "avg_turn_latency_ms" in data["summary"]
+    assert "token_estimates" in data
+    assert data["token_estimates"]["is_token_count_estimated"] is True
+
+
+def test_observability_traces_endpoint(client) -> None:
+    """GET /api/observability/traces returns structured audit traces."""
+    response = client.get("/api/observability/traces?limit=10")
+    assert response.status_code == 200
+    data = response.json()
+    assert "traces" in data
+    assert "count" in data
+    assert isinstance(data["traces"], list)
+
+
+

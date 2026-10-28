@@ -11,6 +11,11 @@ import cors from "cors";
 import { config } from "./config";
 import healthRouter from "./routes/health";
 import chatRouter from "./routes/chat";
+import knowledgeRouter from "./routes/knowledge";
+import memoryRouter from "./routes/memory";
+import agentRouter from "./routes/agent";
+import gitRouter from "./routes/git";
+import observabilityRouter from "./routes/observability";
 
 const app = express();
 
@@ -62,6 +67,12 @@ app.get("/", (_req, res) => {
 
 app.use("/api/health", healthRouter);
 app.use("/api/chat", chatRouter);
+app.use("/api/knowledge", knowledgeRouter);
+app.use("/api/memory", memoryRouter);
+app.use("/api/agent", agentRouter);
+app.use("/api/git", gitRouter);
+app.use("/api/observability", observabilityRouter);
+
 
 // ---------------------------------------------------------------------------
 // 404 handler

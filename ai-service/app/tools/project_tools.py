@@ -446,6 +446,11 @@ class InspectFileTool(Tool):
 def create_default_tool_registry(project_root: str) -> ToolRegistry:
     """
     Factory creating a ToolRegistry pre-populated with Phase 7 read-only tools.
+
+    Phase 9.6 extension: also registers ``semantic_search`` when both
+    DATABASE_URL and GEMINI_API_KEY are configured.  If either is absent
+    the registry is returned without the semantic-search tool so that the
+    existing chat flow is unaffected.
     """
     svc = ProjectService(project_root)
     registry = ToolRegistry()
@@ -453,4 +458,50 @@ def create_default_tool_registry(project_root: str) -> ToolRegistry:
     registry.register(ReadFileTool(svc))
     registry.register(SearchCodeTool(svc))
     registry.register(InspectFileTool(svc))
+
+    # Phase 9.6 — register semantic search if infrastructure is available
+    try:
+        from app.config import settings  # noqa: PLC0415
+        from app.knowledge.retrieval import RetrievalService  # noqa: PLC0415
+        from app.providers.embedding import GeminiEmbeddingProvider  # noqa: PLC0415
+        from app.tools.semantic_search_tool import SemanticSearchTool  # noqa: PLC0415
+
+        db_url = settings.database_url.get_secret_value()
+        api_key = settings.gemini_api_key
+        if db_url and api_key:
+            provider = GeminiEmbeddingProvider(
+                api_key=api_key,
+                model=settings.embedding_model,
+            )
+            retrieval = RetrievalService(provider)
+            registry.register(SemanticSearchTool(retrieval, project_root))
+    except Exception:  # noqa: BLE001
+        # Never let semantic-search wiring errors break the core tool registry
+        pass
+
+    # Integration Bridge — register memory search if DB is configured
+    try:
+        from app.config import settings  # noqa: PLC0415
+        from app.memory.service import MemoryService  # noqa: PLC0415
+        from app.tools.memory_tool import SearchMemoryTool  # noqa: PLC0415
+
+        db_url = settings.database_url.get_secret_value()
+        if db_url:
+            mem_svc = MemoryService()
+            registry.register(SearchMemoryTool(mem_svc, project_root))
+    except Exception:  # noqa: BLE001
+        # Never let memory search wiring errors break the core tool registry
+        pass
+
+    # Phase 12 — register git info tool for agent-driven git inspection
+    try:
+        from app.tools.git_tool import GitInfoTool  # noqa: PLC0415
+
+        registry.register(GitInfoTool(project_root))
+    except Exception:  # noqa: BLE001
+        # Never let git tool wiring errors break the core tool registry
+        pass
+
     return registry
+
+

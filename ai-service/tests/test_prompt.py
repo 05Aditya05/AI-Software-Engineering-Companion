@@ -69,3 +69,49 @@ def test_prompt_builder_debug_summary() -> None:
     assert summary["total_messages"] == 2
     assert summary["roles"] == ["system", "user"]
     assert summary["total_chars"] == 6
+
+
+def test_prompt_builder_screen_context_permitted() -> None:
+    """Phase 14: Screen context is injected into system prompt when explicitly permitted."""
+    from app.schemas.chat import ScreenContextPayload
+
+    payload = ScreenContextPayload(
+        user_granted_permission=True,
+        window_title="VS Code — main.py",
+        display_name="Display 1",
+        captured_at="2026-10-28T12:00:00Z",
+    )
+    builder = PromptBuilder(default_system_prompt="Base system.")
+    messages = builder.build_prompt_messages(
+        user_message="Explain what is on my screen",
+        screen_context=payload,
+    )
+
+    assert len(messages) == 2
+    sys_content = messages[0]["content"]
+    assert "--- Screen Context (User-Granted) ---" in sys_content
+    assert "Active Window: VS Code — main.py" in sys_content
+    assert "Display: Display 1" in sys_content
+    assert "Captured At: 2026-10-28T12:00:00Z" in sys_content
+    assert "Do not persist captured screen data to long-term memory" in sys_content
+
+
+def test_prompt_builder_screen_context_denied() -> None:
+    """Phase 14: Screen context is NOT injected when user_granted_permission is False."""
+    from app.schemas.chat import ScreenContextPayload
+
+    payload = ScreenContextPayload(
+        user_granted_permission=False,
+        window_title="Hidden Window",
+    )
+    builder = PromptBuilder(default_system_prompt="Base system.")
+    messages = builder.build_prompt_messages(
+        user_message="Explain what is on my screen",
+        screen_context=payload,
+    )
+
+    assert len(messages) == 2
+    sys_content = messages[0]["content"]
+    assert "--- Screen Context (User-Granted) ---" not in sys_content
+    assert "Hidden Window" not in sys_content
+
